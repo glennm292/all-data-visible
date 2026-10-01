@@ -1,0 +1,24 @@
+name = "workspace-data"
+display_name = "Data"
+icon = "icon.svg"
+priority = "user"
+program = "workspace-data"
+# Between File Viewer (20) and Browser (30) among the launcher's leading tiles.
+launcher_rank = 25
+
+# No launch path: the desktop offers the synthesized ``open`` at the root, which lands on the
+# query page's tour.
+[default_shortcut]
+launch = "open"
+mode = "focus"
+
+# The skill that installs and updates this app, and checks its saved views.
+[[references]]
+path = ".agents/skills/all-data-visible"
+note = "installs and updates the app; export format, saved-view conventions, query verification"
+
+# How update-app boots a throwaway preview of this app: on a free port, over a
+# scratch copy of its data (see .agents/skills/update-app/scripts/preview_app.py).
+[preview]
+env = {WORKSPACE_DATA_PORT = "{port:main}", WORKSPACE_DATA_HOST = "{host}", WORKSPACE_DATA_DATA_DIR = "{copy:data}"}
+copies = {data = "data/.apps/workspace-data"}

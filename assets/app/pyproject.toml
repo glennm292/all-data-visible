@@ -1,0 +1,22 @@
+[project]
+name = "workspace-data"
+version = "0.1.0"
+description = "Query page over every user-relevant dataset in this workspace, built on DACTAL"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "flask-sock>=0.7",
+    "werkzeug>=3.0",
+    "markdown>=3.5",
+]
+
+[project.scripts]
+workspace-data = "workspace_data.runner:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/workspace_data"]

@@ -1,0 +1,134 @@
+[
+    {
+        "connector": "dactal_spotify.js",
+        "description": "Read/write connector for Spotify.",
+        "namespace": "spotify"
+    },
+    {
+        "connector": "dactal_applemusic.js",
+        "description": "Read/write connector for Apple Music.",
+        "namespace": "apple"
+    },
+    {
+        "connector": "dactal_musicbrainz.js",
+        "description": "Basic metadata connector for MusicBrainz.",
+        "namespace": "musicbrainz"
+    },
+    {
+        "connector": "dactal_discogs.js",
+        "description": "Metadata connector for Discogs (artists, releases, masters, labels).",
+        "namespace": "discogs"
+    },
+    {
+        "connector": "dactal_gmail.js",
+        "description": "Basic connector for basic Gmail retrieval functions."
+    },
+    {
+        "connector": "dactal_gcal.js",
+        "description": "Basic connector for Google Calendar retrieval functions."
+    },
+    {
+        "connector": "dactal_slack.js",
+        "description": "Basic connector for Slack retrieval functions."
+    },
+    {
+        "connector": "dactal_bluesky.js",
+        "description": "Connectors and .car loader for Bluesky/ATProto data."
+    },
+    {
+        "connector": "dactal_cytoscape.js",
+        "description": "Network-graph renderer."
+    },
+    {
+        "connector": "dactal_miller.js",
+        "description": "Miller-column (cascading list) browser renderer."
+    },
+    {
+        "connector": "dactal_wordcloud.js",
+        "description": "Word-cloud renderer."
+    },
+    {
+        "connector": "dactal_chart.js",
+        "description": "Line/bar/area/scatter chart renderer (self-contained SVG)."
+    },
+    {
+        "connector": "dactal_map.js",
+        "description": "Geographic point-map renderer (Leaflet)."
+    },
+    {
+        "connector": "dactal_timeline.js",
+        "description": "Horizontal timeline renderer for dated events (self-contained SVG)."
+    },
+    {
+        "connector": "dactal_rowtate.js",
+        "description": "Renderer that cycles a table through one data row at a time, dissolving between them."
+    },
+    {
+        "connector": "dactal_codemirror.js",
+        "description": "Replaces the plain query-input box with an editor with syntax highlighting."
+    },
+    {
+        "connector": "dactal_yahoo.js",
+        "description": "Basic connector for financial data from Yahoo Finance."
+    },
+    {
+        "connector": "dactal_edgar.js",
+        "description": "Basic connector for limited financial data from EDGAR."
+    },
+    {
+        "connector": "dactal_fmp.js",
+        "description": "Basic connector for very limited financial data from Financial Modeling Prep."
+    },
+    {
+        "connector": "dactal_worldbank.js",
+        "description": "Basic connector for very limited financial data from the World Bank."
+    },
+    {
+        "connector": "dactal_clinicaltrials.js",
+        "description": "Connector that loads full search results from ClinicalTrials.gov (the Download-button JSON)."
+    },
+    {
+        "connector": "dactal_wikipedia.js",
+        "description": "Wikipedia + Wikidata connector (page search/summary, links, entity lookup)."
+    },
+    {
+        "connector": "dactal_openalex.js",
+        "description": "OpenAlex connector for scholarly works, authors and institutions."
+    },
+    {
+        "connector": "dactal_github.js",
+        "description": "GitHub connector for repos, users, contributors and commit activity."
+    },
+    {
+        "connector": "dactal_openmeteo.js",
+        "description": "Open-Meteo connector for geocoding and daily weather/climate history."
+    },
+    {
+        "connector": "dactal_restcountries.js",
+        "description": "Country reference connector (open mledoze dataset via CDN): names, codes, coordinates, currencies, languages, borders."
+    },
+    {
+        "connector": "dactal_census.js",
+        "description": "US Census connector for county and state-legislative-district population by year (ACS 5-year estimates)."
+    },
+    {
+        "connector": "dactal_geocode.js",
+        "description": "Nominatim (OpenStreetMap) address geocoder: street address <-> coordinates."
+    },
+    {
+        "connector": "dactal_census_geocode.js",
+        "description": "US Census BATCH geocoder (address -> lat/lon + FIPS); requires census_geocode_proxy.cgi."
+    },
+    {
+        "connector": "dactal_loader_clf.js",
+        "description": ".clf (Common/Combined Log Format) file loader, streamed to avoid in-memory size limits on large log files."
+    },
+    {
+        "connector": "dactal_loader_rss.js",
+        "description": ".rss and .opml file loaders."
+    },
+    {
+        "connector": "dactal_vegalite.js",
+        "description": "Vega-Lite (and Vega) chart renderer via vega-embed."
+    }
+]
