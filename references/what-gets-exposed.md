@@ -32,6 +32,11 @@ A user-built app is one whose manifest says `priority = "user"` (what the `build
 writes); built-in apps are left out. Each file is capped at 20 MB and 5000 rows. A name that
 collides with another dataset gets its group's name in front.
 
+Logins and keys are never exposed: a file whose name looks like one (`token`, `secret`,
+`credential`, `password`, `api_key`, `cookie`, `oauth`, ...) is skipped whole, and a field named
+like one (`access_token`, `client_secret`, `api_key`, `encrypted_*`, ...) is dropped from every
+row, nested ones included (`read_table` in `collect.py`).
+
 ## The saved views
 
 - **Tour** (`analyses`): everything in this workspace; data from your projects; your

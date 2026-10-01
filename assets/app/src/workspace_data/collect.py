@@ -606,8 +606,38 @@ def _number_or_text(value: str) -> object:
     return value
 
 
+# Logins and keys an app keeps beside its records are never data the user browses: a file named
+# like one is skipped whole, and a field named like one is dropped from every row.
+SECRET_FILE_NAME = re.compile(
+    r"token|secret|credential|password|passwd|api[_-]?key|private[_-]?key|cookie|oauth",
+    re.IGNORECASE,
+)
+SECRET_FIELD_NAME = re.compile(
+    r"secret|password|passwd|api_?key|private_?key|credential|encrypted|cookie|authorization"
+    r"|bearer|token$",
+    re.IGNORECASE,
+)
+
+
+def _without_secrets(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _without_secrets(val)
+            for key, val in value.items()
+            if not SECRET_FIELD_NAME.search(str(key))
+        }
+    if isinstance(value, list):
+        return [_without_secrets(v) for v in value]
+    return value
+
+
 def read_table(path: Path) -> list[dict]:
-    """The records in one data file: JSON, JSON-lines, CSV, or TSV. Unreadable or oversized files give none."""
+    """The records in one data file: JSON, JSON-lines, CSV, or TSV, with any login or key fields removed.
+
+    Unreadable or oversized files, and files that hold logins or keys, give none.
+    """
+    if SECRET_FILE_NAME.search(path.name):
+        return []
     try:
         if path.stat().st_size > TABLE_MAX_BYTES:
             return []
@@ -629,7 +659,7 @@ def read_table(path: Path) -> list[dict]:
                 ]
         except (OSError, UnicodeDecodeError, csv.Error):
             return []
-    return rows[:TABLE_MAX_ROWS]
+    return [_without_secrets(row) for row in rows[:TABLE_MAX_ROWS]]
 
 
 def _source(name: str, group: str, about: str, source: str, rows: list[dict]) -> dict:

@@ -248,5 +248,33 @@ def test_read_table_handles_each_format(tmp_path: Path) -> None:
     assert collect.read_table(tmp_path / "c.jsonl") == [{"k": 1}, {"k": 2}]
 
 
+def test_logins_and_keys_never_reach_the_export(workspace: Path) -> None:
+    data_dir = workspace / "data"
+    _write(
+        data_dir / ".apps" / "music" / "spotify_token.json",
+        json.dumps({"access_token": "SECRET_ACCESS", "expires_at": 1}),
+    )
+    _write(
+        data_dir / ".apps" / "music" / "accounts.json",
+        json.dumps(
+            [
+                {
+                    "id": "a1",
+                    "refresh_token": "SECRET_REFRESH",
+                    "encrypted_refresh": "SECRET_ENCRYPTED",
+                    "settings": {"api_key": "SECRET_KEY", "theme": "dark"},
+                    "input_tokens": 12,
+                }
+            ]
+        ),
+    )
+    result = export.build_export()
+    assert "SECRET_" not in json.dumps(result)
+    assert "music_spotify_token" not in result["data"]
+    assert result["data"]["music_accounts"] == [
+        {"id": "a1", "settings": {"theme": "dark"}, "input_tokens": 12}
+    ]
+
+
 def test_chat_keys_carry_no_hyphen() -> None:
     assert "-" not in collect.chat_key(AGENT_ID)
