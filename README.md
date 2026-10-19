@@ -9,7 +9,8 @@ Exposed, each row linked back to its source and rebuilt as the workspace changes
 
 - conversations and every message in them (the words exchanged, not tool output), each
   chat's progress steps, tracked tasks;
-- files in the user's folders, memories, apps, skills, scheduled jobs;
+- the whole machine's folder tree (`file system`), files in the user's folders, memories, apps, skills,
+  scheduled jobs;
 - **all the data of the user's own projects**: every app's and skill's stored records,
   CSV/TSV/JSON files in the user's folders, data files shipped with user-built apps, and data a
   user-built app keeps in its code (handed over through a small `datasets.py` module).

@@ -79,7 +79,9 @@ def fetch_frontend(assets_dir: Path, refresh_engine: bool) -> dict:
     return result
 
 
-def verify_queries(export_path: Path, engine: Path, strict: bool) -> tuple[dict, int]:
+def verify_queries(
+    export_path: Path, engine: Path, strict: bool, prepare: Path | None = None
+) -> tuple[dict, int]:
     """Run every saved query in the export through the real DACTAL engine (Node)
     and classify each result. Returns (report, exit_code).
 
@@ -89,7 +91,8 @@ def verify_queries(export_path: Path, engine: Path, strict: bool) -> tuple[dict,
     harness = HERE / "verify_queries.js"
     try:
         proc = subprocess.run(
-            ["node", str(harness), "--engine", str(engine), "--export", str(export_path)],
+            ["node", str(harness), "--engine", str(engine), "--export", str(export_path)]
+            + (["--prepare", str(prepare)] if prepare else []),
             capture_output=True,
             text=True,
         )
@@ -143,6 +146,7 @@ def main() -> None:
     p_vq.add_argument("--engine", type=Path, default=BUNDLED_ENGINE, help="dactal.js path (default: bundled snapshot)")
     p_vq.add_argument("--strict", action="store_true", help="also fail on empty/literal results")
     p_vq.add_argument("--json", action="store_true", help="emit the raw JSON report")
+    p_vq.add_argument("--prepare", type=Path, help="module whose linkExport reshapes the export first (as the served page does)")
 
     p_vv = sub.add_parser("verify-visual", help="screenshot each saved-query view in a browser")
     p_vv.add_argument("--url", required=True, help="base URL serving the explorer (e.g. http://localhost:8080)")
@@ -156,7 +160,7 @@ def main() -> None:
         result = fetch_frontend(args.assets_dir, refresh_engine=not args.no_refresh_engine)
         print(json.dumps(result, indent=2))
     elif args.command == "verify-queries":
-        report, code = verify_queries(args.export, args.engine, args.strict)
+        report, code = verify_queries(args.export, args.engine, args.strict, args.prepare)
         if args.json:
             print(json.dumps(report, indent=2))
         else:

@@ -12,6 +12,7 @@ the tour -- with its row count, a one-line description, and an `open »` link.
 | `messages` | message (only the words exchanged: the user's and the mind's text, never tool output; first 2000 characters) | each agent's `events/*/common_transcript/events.jsonl` (`type: step`, `source: user/agent`), plus seeded chats' `seed.jsonl` | `chat` joins `chats`; `source` names the transcript |
 | `steps` | progress step of a chat | `data/.tickets/*.md` with `step: true` | `chat` joins `chats` (empty for agents that are gone); `view raw »` renders the record |
 | `tasks` | shared work item | `data/.tickets/*.md` without `step` | `view raw »` |
+| `file system` | one row: the root folder `/` of the whole machine. Every folder lists its contents under `of` and has each subfolder as a property, so `file system.home.user.workspace.of:=[CLAUDE.md]` and `file system.of:=home.of:=user.of:=workspace.of:~CLAUDE` both reach one file. Symlinked folders are followed unless that loops; `/proc` and `/sys` are listed empty | a walk of `/` (`machine_files.py`), cached for 10 minutes; the export carries it compact and `assets/files_tree.cjs` links it on import (the page and the query harness both run it) | each item's `path`; files carry `size` in bytes |
 | `files` | file in the user's visible folders of `data/`, plus `memories/` | the file tree | `open file »` opens it in the File Viewer |
 | `memories` | memory note | `data/memories/*.md` frontmatter + body | `open note »` |
 | `apps` | app the user can open | `data/.state/apps.toml` (not `internal`) | `open … »` opens the app |
@@ -42,10 +43,46 @@ row, nested ones included (`read_table` in `collect.py`).
 - **Tour** (`analyses`): everything in this workspace; data from your projects; your
   conversations; messages per day (chart); what you asked for; who does the talking; recent
   progress; your files by folder.
-- **Browse**: one `all <dataset>` view per dataset, sorted sensibly.
+- **Browse**: one `all <dataset>` view per dataset, sorted sensibly, plus "this machine, from
+  the top" (`file system.of#kind,name`).
 - **Project views**: whatever each project's `datasets.py` brings, tagged with its group.
 - **Diagnostics**: orphan checks that must stay empty (messages with no conversation, steps
   with an unknown conversation, plus any a project adds).
+
+## Querying the file system
+
+`file system` is one item, the root folder. Walk it by property or by contents:
+
+```
+file system.home.user.workspace.of:=[CLAUDE.md]          # subfolders as properties
+file system.of:=home.of:=user.of:=workspace.of:~CLAUDE  # contents, filtered by name
+file system.[mngr-vol].home.workspace.of#-size          # escape names with hyphens in [...]
+file system._,of!/name#count|total size=(....→size,total)
+```
+
+The last one takes every item on the machine (`._,of!` repeats "itself plus its contents" until
+nothing new turns up), groups by name, and totals the sizes: which names occur most, and how
+much space they take. It runs in about 15 seconds. Its closest shell equivalent, which gives
+the same counts and totals:
+
+```sh
+find / \( -path /proc -o -path /sys \) -prune -o \
+     \( -type d -printf '0\t%f\n' -o -printf '%s\t%f\n' \) 2>/dev/null |
+  awk -F'\t' '{ n[$2]++; s[$2] += $1 }
+              END { for (k in n) printf "%d\t%d\t%s\n", n[k], s[k], k }' |
+  sort -k1,1nr
+```
+
+(`find` does not follow symlinked folders, matching the tree, where a link shares its target's
+items so nothing counts twice; a symlinked file's `size` in the tree is its target's.)
+
+How it is built: the export carries the tree compact (a file is `[name, size]`, a folder
+`{name, of}`, a followed folder link `{name, link}`, one that would loop `{name, loop}`), since
+a folder sits both in its parent's `of` and under its own name and JSON cannot share objects.
+`assets/files_tree.cjs` links it into shared items. The page runs it on import and again after
+restoring its stored copy, and the query harness runs it through `--prepare`. Subfolder
+properties are non-enumerable so the table never expands a whole subtree; the browser's stored
+copy drops them, hence the relink.
 
 ## Extending it
 

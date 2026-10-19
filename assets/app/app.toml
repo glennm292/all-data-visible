@@ -5,6 +5,9 @@ priority = "user"
 program = "workspace-data"
 # Between File Viewer (20) and Browser (30) among the launcher's leading tiles.
 launcher_rank = 25
+# A background loop rebuilds the export every two minutes so the data is current
+# before anyone opens the page; keep it running between windows.
+stop_when_no_windows = false
 
 # No launch path: the desktop offers the synthesized ``open`` at the root, which lands on the
 # query page's tour.

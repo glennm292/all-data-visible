@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from workspace_data import collect, export
+from workspace_data import collect, export, machine_files
 
 AGENT_ID = "agent-0123456789abcdef0123456789abcdef"
 WORKER_ID = "agent-fedcba9876543210fedcba9876543210"
@@ -150,6 +150,11 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(collect, "APPS_DIR", apps)
     monkeypatch.setattr(collect, "PROJECT_PYTHON", "/nonexistent/python")
     monkeypatch.setattr(collect, "_PROVIDER_CACHE", {})
+    _write(tmp_path / "machine" / "etc" / "hosts", "127.0.0.1 localhost\n")
+    monkeypatch.setattr(machine_files, "ROOT", str(tmp_path / "machine"))
+    monkeypatch.setattr(
+        export, "MACHINE_FILES_CACHE", tmp_path / "cache" / "machine_files.json"
+    )
     return tmp_path
 
 
@@ -278,3 +283,17 @@ def test_logins_and_keys_never_reach_the_export(workspace: Path) -> None:
 
 def test_chat_keys_carry_no_hyphen() -> None:
     assert "-" not in collect.chat_key(AGENT_ID)
+
+
+def test_the_machine_tree_is_file_system_and_the_users_folders_are_files(
+    workspace: Path,
+) -> None:
+    result = export.build_export()
+    data = result["data"]
+    [root] = data["file system"]
+    assert root["id"] == str(workspace / "machine")
+    assert root["of"] == [{"name": "etc", "of": [["hosts", 20]]}]
+    assert "my-project" in {r["folder"] for r in data["files"]}
+    queries = {q["name"]: q["query"] for q in result["queries"]}
+    assert queries["your files by folder"].startswith("files/folder")
+    assert queries["this machine, from the top"].startswith("file system.of")

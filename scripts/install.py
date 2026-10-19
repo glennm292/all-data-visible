@@ -279,6 +279,8 @@ def verify(workspace: Path) -> int:
             "verify-queries",
             "--export",
             str(export_path(workspace)),
+            "--prepare",
+            str(_app_dir(workspace) / "src" / "workspace_data" / "assets" / "files_tree.cjs"),
         ]
     ).returncode
 

@@ -16,7 +16,9 @@
 //             one property" query (e.g. `teams.confed`), so it is a WARNING.
 //   ok      - >=1 record (object) row
 //
-// Usage: node verify_queries.js --engine <dactal.js> --export <export.json>
+// Usage: node verify_queries.js --engine <dactal.js> --export <export.json> [--prepare <module.js>]
+// --prepare names a module exporting linkExport(export): it reshapes the export the way the
+// served page does before importing it (the Data app's files tree, assets/files_tree.cjs).
 // Emits JSON: {queries:[{name,tag,order,query,status,rows,sample}], summary:{...}}
 
 const fs = require("fs");
@@ -40,7 +42,9 @@ global.window = global;
 require(path.resolve(enginePath));
 const DACTAL = global.window.DACTAL.constructor;
 
-const exp = JSON.parse(fs.readFileSync(exportPath, "utf8"));
+const preparePath = arg("--prepare");
+let exp = JSON.parse(fs.readFileSync(exportPath, "utf8"));
+if (preparePath) exp = require(path.resolve(preparePath)).linkExport(exp);
 const exportDir = path.dirname(path.resolve(exportPath));
 const data = exp.data || {};
 const queries = exp.queries || [];

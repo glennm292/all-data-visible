@@ -128,7 +128,30 @@ def served_dactal_html() -> str:
         page = page.replace(
             f'dactal.org/{script}"', f'dactal.org/{script}?cb={cache_buster}"'
         )
-    return page.replace("</body>", _WORKSPACE_GLUE + "</body>", 1)
+    return page.replace(
+        "</body>", _files_tree_script() + _WORKSPACE_GLUE + "</body>", 1
+    )
+
+
+def _files_tree_script() -> str:
+    """The linker for the ``files`` tree, run on every export the page imports (machine_files)."""
+    linker = (ASSETS / "files_tree.cjs").read_text(encoding="utf-8")
+    # Link on import, and relink after the page restores its stored copy.
+    return (
+        "<script>"
+        + linker
+        + """
+(function(){
+  var importData = window.import_data;
+  window.import_data = function(exported, overwrite){
+    return importData(window.linkFilesExport(exported), overwrite); };
+  var dataInit = window.dactal_data_init;
+  window.dactal_data_init = async function(){
+    var result = await dataInit.apply(this, arguments);
+    window.relinkFilesData(dactal.data);
+    return result; };
+})();</script>"""
+    )
 
 
 # ---- opening workspace windows ------------------------------------------------------

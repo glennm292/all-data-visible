@@ -11,9 +11,10 @@ The ``analyses`` ones form the narrated tour, chained in ``order``.
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
-from workspace_data import collect
+from workspace_data import collect, machine_files
 
 DBNAME = "workspace"
 FIRST_TOUR_QUERY = "everything in this workspace"
@@ -34,6 +35,9 @@ DATASET_ABOUT = {
     "messages": "Every message in those conversations -- your words and your mind's replies (not its tool output).",
     "steps": "The progress timeline of each conversation: what your mind set out to do and what it did.",
     "tasks": "Shared work items your mind tracked across conversations.",
+    "file system": "Every file and folder on this machine, as one folder tree: each folder lists "
+    "its contents under 'of', and each subfolder is also a property "
+    "(file system.home.user.workspace.of).",
     "files": "Every file in your own folders (documents, uploads, projects, memories).",
     "memories": "What your mind has noted to remember about you and your work.",
     "apps": "The apps you can open in this workspace.",
@@ -48,6 +52,7 @@ BROWSE_SORT = {
     "messages": "#-ts",
     "steps": "#-ts",
     "tasks": "#-ts",
+    "file system": ".of",
     "files": "#-ts",
     "memories": "#-ts",
     "apps": "#launcher_order",
@@ -55,6 +60,10 @@ BROWSE_SORT = {
     "scheduled_jobs": "#-ts",
 }
 ALL_ROWS = ":@<=5000"
+# The machine's folder tree, cached between rebuilds (walking it takes seconds).
+MACHINE_FILES_CACHE = Path(
+    os.environ.get("WORKSPACE_DATA_DATA_DIR", "data/.apps/workspace-data")
+) / "machine_files.json"
 # Dataset names the export uses itself; a project dataset with one of them is renamed.
 RESERVED_NAMES = frozenset(
     {"datasets", "connectors", "queries", "adapters", "annotators"}
@@ -170,6 +179,17 @@ def build_queries(dataset_names: list[str], extra_queries: list[dict]) -> list[d
         {"name": "all tasks", "tag": "browse", "hide": ["ts"], "query": "tasks#-ts"},
         {"name": "all files", "tag": "browse", "hide": ["ts"], "query": "files#-ts"},
         {
+            "name": "this machine, from the top",
+            "tag": "browse",
+            "hide": ["id"],
+            "query": "file system.of#kind,name"
+            + note(
+                "Everything at the top of this machine's folder tree. Every folder lists its "
+                "contents under 'of' and has each subfolder as a property, so "
+                "file system.home.user.workspace.of lists the workspace folder."
+            ),
+        },
+        {
             "name": "all memories",
             "tag": "browse",
             "hide": ["ts"],
@@ -230,6 +250,7 @@ def build_export() -> dict:
         "messages": messages,
         "steps": steps,
         "tasks": tasks,
+        "file system": [machine_files.cached_tree(MACHINE_FILES_CACHE)],
         "files": collect.collect_files(),
         "memories": collect.collect_memories(),
         "apps": collect.collect_apps(),
