@@ -60,7 +60,20 @@ file system.[mngr-vol].home.workspace.of#-size          # escape names with hyph
 file system._,of!/name#count|total size=(....→size,total)
 ```
 
-The last one takes every item on the machine (`._,of!` repeats "itself plus its contents" until
+A file's text comes on demand from the `contents` adapter, registered on the query page:
+
+```
+file system.home.user.workspace.of:=[CLAUDE.md].contents         # the text itself
+file system.home.user.workspace.of:kind=file|contents#-size      # as a column
+```
+
+It fetches `/contents?path=...` from the runner (`machine_files.text_contents`), which answers
+with the text of a UTF-8 file up to 1 MB and with nothing for a folder, a binary file, a larger
+one, or a file named like a login or key (`collect.SECRET_FILE_NAME`). The page keeps each answer
+in its stored index, so a file that changes afterwards shows its old text until that index is
+cleared.
+
+The recursive query in the first block takes every item on the machine (`._,of!` repeats "itself plus its contents" until
 nothing new turns up), groups by name, and totals the sizes: which names occur most, and how
 much space they take. It runs in about 15 seconds. Its closest shell equivalent, which gives
 the same counts and totals:

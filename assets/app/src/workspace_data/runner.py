@@ -35,7 +35,7 @@ import markdown
 from flask import Flask, Response, abort, redirect, request, send_from_directory
 from werkzeug.serving import run_simple
 
-from workspace_data import collect, export
+from workspace_data import collect, export, machine_files
 
 DATA_DIR = Path(os.environ.get("WORKSPACE_DATA_DATA_DIR", "data/.apps/workspace-data"))
 PORT = int(os.environ.get("WORKSPACE_DATA_PORT", "__PORT__"))
@@ -136,7 +136,9 @@ def served_dactal_html() -> str:
 def _files_tree_script() -> str:
     """The linker for the ``files`` tree, run on every export the page imports (machine_files)."""
     linker = (ASSETS / "files_tree.cjs").read_text(encoding="utf-8")
-    # Link on import, and relink after the page restores its stored copy.
+    # Link on import, relink after the page restores its stored copy, and register the
+    # ``contents`` adapter: ``<file item>.contents`` (or ``|contents``) fetches the file's text
+    # from ``/contents``; anything that is not readable text gives nothing.
     return (
         "<script>"
         + linker
@@ -150,6 +152,13 @@ def _files_tree_script() -> str:
     var result = await dataInit.apply(this, arguments);
     window.relinkFilesData(dactal.data);
     return result; };
+  dactal.connect_annotator('contents', async function(item){
+    if (!item || item.kind !== 'file' || !item.path) return null;
+    var response = await fetch('contents?path=' + encodeURIComponent(item.path));
+    return response.status === 200 ? await response.text() : null;
+  }, ['path'], {requires: [{property: 'path', default: '(required)',
+      description: 'full path of a file in the file system dataset'}],
+    produces: 'the file text, or nothing when it is not readable text (binary, over 1 MB, a login or key file)'});
 })();</script>"""
     )
 
@@ -272,6 +281,15 @@ def raw(kind: str, ident: str) -> Response:
         body=markdown.markdown(body, extensions=["fenced_code", "tables"]),
     )
     return Response(page, mimetype="text/html")
+
+
+@app.route("/contents")
+def contents() -> Response:
+    """The text of one file on this machine (the page's ``contents`` adapter); 204 when it has none."""
+    text = machine_files.text_contents(request.args.get("path", ""))
+    if text is None:
+        return Response(status=204)
+    return Response(text, mimetype="text/plain; charset=utf-8")
 
 
 @app.route("/health")

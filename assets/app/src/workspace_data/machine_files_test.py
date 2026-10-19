@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from workspace_data import machine_files
+from workspace_data import machine_files, runner
 
 ASSETS = Path(__file__).parent / "assets"
 # Tests run from the installed copy (system/apps/workspace_data/...); the engine snapshot ships
@@ -138,3 +138,29 @@ def test_the_tree_is_cached_until_it_is_stale(
     (machine / "new.txt").write_text("x")
     assert machine_files.cached_tree(cache) == first
     assert ["new.txt", 1] in machine_files.cached_tree(cache, max_age=0)["of"]
+
+
+def test_contents_gives_text_and_nothing_for_anything_else(tmp_path: Path) -> None:
+    (tmp_path / "notes.md").write_text("# héllo\n", encoding="utf-8")
+    (tmp_path / "image.bin").write_bytes(b"\x89PNG\0\0data")
+    (tmp_path / "latin.txt").write_bytes("caf\xe9".encode("latin-1"))
+    (tmp_path / "api_token.json").write_text('{"token": "x"}')
+    (tmp_path / "big.txt").write_text("a" * (machine_files.CONTENTS_MAX_BYTES + 1))
+    os.symlink(tmp_path / "notes.md", tmp_path / "link.md")
+    assert machine_files.text_contents(str(tmp_path / "notes.md")) == "# héllo\n"
+    assert machine_files.text_contents(str(tmp_path / "link.md")) == "# héllo\n"
+    for name in ("image.bin", "latin.txt", "api_token.json", "big.txt", "missing.txt"):
+        assert machine_files.text_contents(str(tmp_path / name)) is None, name
+    assert machine_files.text_contents(str(tmp_path)) is None
+    assert machine_files.text_contents("notes.md") is None
+
+
+def test_the_page_reads_contents_through_the_runner(tmp_path: Path) -> None:
+    (tmp_path / "notes.md").write_text("hello", encoding="utf-8")
+    (tmp_path / "image.bin").write_bytes(b"\0\0")
+    client = runner.app.test_client()
+    found = client.get("/contents", query_string={"path": str(tmp_path / "notes.md")})
+    assert found.status_code == 200 and found.get_data(as_text=True) == "hello"
+    binary = client.get("/contents", query_string={"path": str(tmp_path / "image.bin")})
+    assert binary.status_code == 204
+    assert "connect_annotator('contents'" in runner.served_dactal_html()

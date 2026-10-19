@@ -17,6 +17,10 @@ shows as an empty folder.
 
 Walking the machine takes seconds, so the tree is cached on disk and rebuilt at most every
 ``MAX_AGE_SECONDS``.
+
+A file's text is not in the tree: the query page's ``contents`` adapter asks the runner for it
+on demand (``text_contents``), so ``file system.home.user.workspace.of:=[CLAUDE.md].contents``
+reads that one file.
 """
 
 import bisect
@@ -25,10 +29,16 @@ import os
 import time
 from pathlib import Path
 
+from workspace_data.collect import SECRET_FILE_NAME
+
 ROOT = "/"
 # Virtual kernel folders: thousands of entries that are not files and change by the second.
 SKIPPED = frozenset({"/proc", "/sys"})
 MAX_AGE_SECONDS = 600.0
+# Larger files give no contents: the text lands in a table cell and in the browser's storage.
+CONTENTS_MAX_BYTES = 1_000_000
+# How far into a file to look for a NUL byte, the mark of binary data.
+BINARY_SNIFF_BYTES = 8192
 
 
 def _join(parent: str, name: str) -> str:
@@ -119,6 +129,30 @@ def build_tree(root: str | None = None) -> dict:
     _break_loops(links)
     tree["id"] = root
     return tree
+
+
+def text_contents(path: str) -> str | None:
+    """The text of the file at ``path``, or None when it is not readable UTF-8 text.
+
+    None for: anything not a regular file (after following symlinks), files over
+    ``CONTENTS_MAX_BYTES``, binary files, files that do not decode as UTF-8, and files named
+    like logins or keys (the same rule that keeps them out of the export).
+    """
+    if not os.path.isabs(path) or SECRET_FILE_NAME.search(os.path.basename(path)):
+        return None
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) > CONTENTS_MAX_BYTES:
+            return None
+        with open(path, "rb") as handle:
+            raw = handle.read(CONTENTS_MAX_BYTES + 1)
+    except OSError:
+        return None
+    if len(raw) > CONTENTS_MAX_BYTES or b"\0" in raw[:BINARY_SNIFF_BYTES]:
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def cached_tree(cache: Path, max_age: float = MAX_AGE_SECONDS) -> dict:
