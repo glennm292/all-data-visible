@@ -11,6 +11,12 @@ dependencies = [
     "markdown>=3.5",
 ]
 
+[dependency-groups]
+dev = [
+    # Used by test_no_type_errors in the ratchets, pinned to the version the shell and chat use.
+    "ty==0.0.85",
+]
+
 [project.scripts]
 workspace-data = "workspace_data.runner:main"
 
@@ -20,3 +26,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/workspace_data"]
+
+# Makes this directory ty's project; without a [tool.ty] table ty keeps searching upward.
+[tool.ty]

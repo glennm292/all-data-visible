@@ -5,6 +5,7 @@ at it, so what is asserted is what a real install would expose.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -297,3 +298,93 @@ def test_the_machine_tree_is_file_system_and_the_users_folders_are_files(
     queries = {q["name"]: q["query"] for q in result["queries"]}
     assert queries["your files by folder"].startswith("files/folder")
     assert queries["this machine, from the top"].startswith("file system.of")
+
+
+def test_an_apps_several_record_files_are_packaged_as_one_item(workspace: Path) -> None:
+    _write(
+        workspace / "data" / ".apps" / "planner" / "hotels.json",
+        json.dumps([{"id": "h1", "name": "Casa"}]),
+    )
+    data = export.build_export()["data"]
+    assert "planner_trips" not in data and "planner_hotels" not in data
+    assert data["planner"] == [
+        {
+            "id": "planner",
+            "name": "planner",
+            "hotels": [{"id": "h1", "name": "Casa"}],
+            "trips": [{"id": "trip1", "city": "Lisbon"}],
+        }
+    ]
+    catalog = {r["id"]: r for r in data["datasets"]}
+    assert catalog["planner"]["group"] == "app: planner"
+    assert "hotels, trips" in catalog["planner"]["about"]
+
+
+def test_a_family_of_files_in_one_folder_is_packaged_under_its_first_word(
+    workspace: Path,
+) -> None:
+    docs = workspace / "data" / "documents"
+    _write(docs / "workspace-skills-2026-10-16.json", json.dumps([{"id": "s"}]))
+    _write(docs / "workspace-templates-2026-10-16.json", json.dumps([{"id": "t"}]))
+    _write(docs / "budget-2026.csv", "item,cost\nrent,9\n")
+    data = export.build_export()["data"]
+    assert data["workspace"] == [
+        {
+            "id": "workspace",
+            "name": "workspace",
+            "skills_2026_10_16": [{"id": "s"}],
+            "templates_2026_10_16": [{"id": "t"}],
+        }
+    ]
+    assert not any(name.startswith("documents_workspace") for name in data)
+    # A file with no family stays a dataset of its own.
+    assert data["documents_budget_2026"] == [{"item": "rent", "cost": 9}]
+
+
+def test_a_project_that_hands_over_its_stored_records_owns_them(
+    workspace: Path,
+) -> None:
+    game = workspace / "system/apps/demo_game/src/demo_game/datasets.py"
+    stored = workspace / "data" / ".apps" / "demo-game" / "scores.jsonl"
+    _write(stored, _events({"id": "g1", "score": 3}))
+    _write(
+        game,
+        "import json, pathlib, sys\n"
+        f"lines = pathlib.Path({str(stored)!r}).read_text().splitlines()\n"
+        "scores = [json.loads(l) for l in lines]\n"
+        'json.dump({"datasets": {"demo": {"about": "All of it.", "rows": '
+        '[{"id": "demo", "scores": scores}]}}, "includes_app_records": True}, sys.stdout)\n',
+    )
+    data = export.build_export()["data"]
+    assert data["demo"][0]["scores"] == [{"id": "g1", "score": 3}]
+    assert not any(name.startswith("demo_game") for name in data)
+    # A new stored record reaches the item on the next rebuild, with no code change.
+    with stored.open("a") as handle:
+        handle.write(json.dumps({"id": "g2", "score": 5}) + "\n")
+    os.utime(stored, (stored.stat().st_atime, stored.stat().st_mtime + 5))
+    data = export.build_export()["data"]
+    assert [s["id"] for s in data["demo"][0]["scores"]] == ["g1", "g2"]
+
+
+def test_a_group_items_id_and_name_are_its_first_two_properties(
+    workspace: Path,
+) -> None:
+    _write(
+        workspace / "data" / ".apps" / "planner" / "hotels.json",
+        json.dumps([{"id": "h1", "name": "Casa"}]),
+    )
+    _write(
+        workspace / "system/apps/demo_game/src/demo_game/datasets.py",
+        "import json, sys\n"
+        'json.dump({"datasets": {"demo": {"about": "All of it.", "rows": '
+        '[{"moves": [{"id": "m1"}], "name": "Demo", "id": "demo", "figures": [{"id": "f1"}]}]}}}, sys.stdout)\n',
+    )
+    target = workspace / "out" / "workspace.json"
+    export.write_export(target)
+    data = json.loads(target.read_text(encoding="utf-8"))["data"]
+    assert list(data["planner"][0]) == ["id", "name", "hotels", "trips"]
+    assert data["planner"][0]["name"] == "planner"
+    assert list(data["demo"][0]) == ["id", "name", "figures", "moves"]
+    # Every other row keeps its keys sorted, so the export's bytes stay stable.
+    assert list(data["demo"][0]["figures"][0]) == ["id"]
+    assert list(data["my_project_budget"][0]) == ["cost", "item"]

@@ -34,6 +34,7 @@ from urllib.parse import quote
 import markdown
 from flask import Flask, Response, abort, redirect, request, send_from_directory
 from werkzeug.serving import run_simple
+from werkzeug.wrappers import Response as WerkzeugResponse
 
 from workspace_data import collect, export, machine_files
 
@@ -77,7 +78,11 @@ def _background_refresh() -> None:
 # one here would run it before the page's engine exists.
 _FRONTEND_SCRIPTS = ("dactal.js", "dactal_storage_indexeddb.js", "dactal_utils.js")
 
-# Re-import the browser's private copy only when the export's content hash changed.
+# Re-import the browser's private copy only when the export's content hash changed -- or when
+# STORED_COPY_REVISION moves, which makes every browser re-import once. Bump it when a change
+# to how the page treats its stored copy must reach copies stored before it (2: drop what the
+# export no longer has, ``_RETIRE_SCRIPT``).
+STORED_COPY_REVISION = "2"
 _RELOAD_BOOTSTRAP = """<script>(function(){{try{{
   var v="{version}"; var p=new URLSearchParams(location.search);
   var db=p.get('dbname'); if(!db) return; var key='dactal_dv_'+db;
@@ -116,12 +121,41 @@ _WORKSPACE_GLUE = """<script>(function(){
   }, true);
 })();</script>"""
 
+# On a re-import (the export changed), drop from the browser's stored copy what the export no
+# longer has -- the page itself only ever adds and overwrites. A dataset is the export's if the
+# previous export's catalog (``datasets``) listed it; a saved view is if it carries one of the
+# export's tags. Datasets a connector loaded and views the user saved under their own tags stay.
+_RETIRE_SCRIPT = """<script>(function(){
+  var EXPORT_TAG = /^(analyses|browse|diagnostic|(project|app|folder|skill): .*)$/;
+  var importData = window.import_data;
+  window.import_data = async function(exported, overwrite){
+    if (overwrite && exported && exported.data) {
+      var keep = exported.data;
+      (dactal.data.datasets || []).forEach(function(row){
+        var name = row && row.id;
+        if (!name || name in keep || !(name in dactal.data)) return;
+        delete dactal.data[name];
+        dactaldb.remove(name);
+      });
+      var names = new Set((exported.queries || []).map(function(q){ return q.name; }));
+      var queries = dactal.data.queries || [];
+      var kept = queries.filter(function(q){
+        var stale = q && EXPORT_TAG.test(q.tag || '') && !names.has(q.name);
+        if (stale) dactal.savedquerynames.delete(q.name);
+        return !stale;
+      });
+      if (kept.length !== queries.length) { dactal.data.queries = kept; dsave('queries'); }
+    }
+    return importData(exported, overwrite);
+  };
+})();</script>"""
+
 
 def served_dactal_html() -> str:
     page = (ASSETS / "dactal.html").read_text(encoding="utf-8")
     version = export.content_version(EXPORT_PATH)
     page = page.replace(
-        "<head>", "<head>\n" + _RELOAD_BOOTSTRAP.format(version=version), 1
+        "<head>", "<head>\n" + _RELOAD_BOOTSTRAP.format(version=f"{version}.{STORED_COPY_REVISION}"), 1
     )
     cache_buster = str(int((ASSETS / "dactal.html").stat().st_mtime))
     for script in _FRONTEND_SCRIPTS:
@@ -129,7 +163,9 @@ def served_dactal_html() -> str:
             f'dactal.org/{script}"', f'dactal.org/{script}?cb={cache_buster}"'
         )
     return page.replace(
-        "</body>", _files_tree_script() + _WORKSPACE_GLUE + "</body>", 1
+        "</body>",
+        _files_tree_script() + _RETIRE_SCRIPT + _WORKSPACE_GLUE + "</body>",
+        1,
     )
 
 
@@ -217,7 +253,7 @@ app = Flask("workspace_data", static_folder=None)
 
 
 @app.route("/")
-def index() -> Response:
+def index() -> WerkzeugResponse:
     refresh_export(STALE_AFTER_SECONDS)
     return redirect(
         f"dactal.html?dbname={export.DBNAME}&query={quote(export.FIRST_TOUR_QUERY)}"
@@ -233,7 +269,7 @@ def dactal_html() -> Response:
 
 
 @app.route("/data/<path:filename>")
-def data(filename: str) -> Response:
+def data(filename: str) -> WerkzeugResponse:
     if not EXPORT_PATH.exists():
         refresh_export()
     if not (EXPORT_PATH.parent / filename).is_file():
@@ -245,7 +281,7 @@ def data(filename: str) -> Response:
 
 
 @app.route("/queries/<path:filename>")
-def gallery_picture(filename: str) -> Response:
+def gallery_picture(filename: str) -> WerkzeugResponse:
     return redirect(f"{DACTAL_ORIGIN}/queries/{quote(filename)}")
 
 

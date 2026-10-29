@@ -284,6 +284,16 @@ class DACTAL {
                 })
                 return [newobj];
             },
+            disarray: (item) => {
+                if (!item.fields || !item.of) return [];
+                const fields = item.fields;
+                return item.of.map((subitem) => {
+                    if (!Array.isArray(subitem)) return;
+                    const newobj = {};
+                    subitem.forEach((v, vx) => newobj[fields[vx]] = v);
+                    return newobj;
+                }).filter((i) => i != null)
+            },
             csv: (item) => {
                 const keys = Object.entries(item).find(([k, v]) => k != 'of')[1];
                 const res = [];
@@ -413,6 +423,9 @@ class DACTAL {
             floor: (item) => this.numvals(item).map((v) => Math.floor(v)),
             ceil: (item) => this.numvals(item).map((v) => Math.ceil(v)),
             dollars: (item) => this.numvals(item).map((v) => '$' + v.toFixed(2)),
+            kb: (item) => this.numvals(item).map((v) => (v / 1024).toFixed(1) + ' KB'),
+            mb: (item) => this.numvals(item).map((v) => (v / 1024**2).toFixed(1) + ' MB'),
+            gb: (item) => this.numvals(item).map((v) => (v / 1024**3).toFixed(1) + ' GB'),
             n: (item) => {
                 let i = 0;
                 const test = this.getname(item.of[0]);
@@ -478,7 +491,7 @@ class DACTAL {
                 return item.of.map((subitem) => ({weight: Number(subitem.weight || 1) * Math.random(), subitem: subitem})).sort((a, b) => b.weight - a.weight).map((ws) => ws.subitem);
             },
             pick: (item) => item?.of?.[~~(Math.random() * item?.of?.length)],
-            link: (item) => `<a href="${item.url}"${item.target ? ' target="' + item.target + '"' : ''}>${item.text}</a>`,
+            link: (item) => `<a href="${item.url || item.uri}"${item.target ? ' target="' + item.target + '"' : ''}>${item.text || item.name}</a>`,
             img: (item) => {
                 if (item.uri) {
                     return `<a href="${item.uri}"><img src="${item.src}" height=${item.height}px width=${item.width}px></a>`;
@@ -618,12 +631,13 @@ class DACTAL {
         return reset;
     }
 
-    load(something, named, append=false) {
+    load(something, named, append=false, destructure=false) {
         if (!named) return
         if (!append || !(named in this.data)) this.data[named] = [];
         if (Array.isArray(something)) {
             something.forEach((somethingx) => this.data[named].push(somethingx));
-        } else if (typeof something == 'object') {
+        } else if (destructure && typeof something == 'object') {
+            console.log('destructuring object into dataset ' + named);
             const firstkey = Object.keys(something)[0];
             const firstobj = something[firstkey];
             if (typeof firstobj === 'object' && !Array.isArray(firstobj) && (firstkey in Object.values(firstobj) || 'id' in firstobj)) {
@@ -636,6 +650,7 @@ class DACTAL {
                 this.data[named].push(...Object.entries(something).map(([key, val]) => ({id: key, value: val})));
             }
         } else {
+            console.log('loading non-array into dataset ' + named);
             this.data[named].push(something);
         }
         return this.data[named];
@@ -745,7 +760,7 @@ class DACTAL {
 
     assemble(tokenized) {
         const isOperator = (token) => '???....://#|!'.includes(token);
-        const tokenlist = '= ~ =~ ~< ~> > < <> >< >= <= - =- ~- + =+ @ @@ @- @= @@= =@ =@@ @< @@< @<= @@<= @> @@> @>= @@>= =>'.split(' ');
+        const tokenlist = '= ~ =~ ~< ~> > < <> >< >= <= - =- ~- + =+ @ @@ @- @= @@= =@ =@@ @< @@< @<= @@<= @> @@> @>= @@>= ~@ ~@@ =>'.split(' ');
         const isSubop = (token) => tokenlist.includes(token) || (token?.startsWith('-') && (token.length == 1 || tokenlist.includes(token.slice(1))));
         const isSeparator = (token) => ',;'.includes(token);
         const isValue = (token) => !isOperator(token) && !isSubop(token) && !isSeparator(token);
@@ -949,7 +964,11 @@ class DACTAL {
                                 }
                             } else {
                                 if (arg.label) labeled[arg.label] = startitems;
-                                startitems.forEach((si) => outputlist.push(si));
+                                if (Array.isArray(startitems)) {
+                                    startitems.forEach((si) => outputlist.push(si));
+                                } else {
+                                    outputlist.push(startitems);
+                                }
                             }
                         }
                     });
@@ -1212,6 +1231,7 @@ class DACTAL {
                         this.timecheck(filtertimer, i, currentlist.length, op);
                         return ands.filter((and) => {
                             return and.filter((arg) => {
+                                if (arg.subop == null && arg.label == null && arg.value == null) return !!item;
                                 let comparator = arg.subop;
                                 let polarize = (x) => x;
                                 if (comparator?.startsWith('-') || comparator?.endsWith('-')) {
@@ -1845,10 +1865,11 @@ class DACTAL {
                                     if (arg.label) {
                                         let vals = [];
                                         if (arg.subop.endsWith('@')) {
+                                            const startat = arg.subop.includes('~') ? 0 : 1;
                                             if (arg.subop.endsWith('@@')) {
-                                                arg.counter ??= arg.value == null ? outputlist.length + 1 : 0;
+                                                arg.counter ??= arg.value == null ? outputlist.length + startat : 0;
                                             } else {
-                                                arg.counter ??= 1;
+                                                arg.counter ??= startat;
                                                 vals = [arg.counter];
                                             }
                                             if (Array.isArray(arg.value)) {
@@ -1956,8 +1977,11 @@ class DACTAL {
                 const sq = savedqueries[0];
                 const results = typeof sq.results === 'number' ? this.index_init(sq.name)[sq.results] : sq.results;
                 if (results) return results.slice(0);
-                sq.results = this.executeq(sq.query);
-                return sq.results.slice(0);
+                const tempresults = this.executeq(sq.query);
+                if (!Object.values(this.adapters).some((a) => a.queue.length > 0)) {
+                    sq.results = tempresults.slice();
+                }
+                return tempresults;
             }
         }
         return null;
@@ -2144,7 +2168,7 @@ class DACTAL {
                 return vval ? vval.toString() : match;
             }) : template;
             if (val) vals.push(val);
-        } else if (item) {
+        } else if (item != null && item != undefined) {
             let found = false;
             if (property != null && !dtype(item, 'literal')) {
                 const tryvals = [property];

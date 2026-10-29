@@ -61,9 +61,10 @@ BROWSE_SORT = {
 }
 ALL_ROWS = ":@<=5000"
 # The machine's folder tree, cached between rebuilds (walking it takes seconds).
-MACHINE_FILES_CACHE = Path(
-    os.environ.get("WORKSPACE_DATA_DATA_DIR", "data/.apps/workspace-data")
-) / "machine_files.json"
+MACHINE_FILES_CACHE = (
+    Path(os.environ.get("WORKSPACE_DATA_DATA_DIR", "data/.apps/workspace-data"))
+    / "machine_files.json"
+)
 # Dataset names the export uses itself; a project dataset with one of them is renamed.
 RESERVED_NAMES = frozenset(
     {"datasets", "connectors", "queries", "adapters", "annotators"}
@@ -237,6 +238,44 @@ def _uses_present(query: str, present: set[str]) -> bool:
     return head in present or head not in DATASET_ABOUT
 
 
+def _sorted(value: object) -> object:
+    """Every object's keys in sorted order, all the way down (what makes the export's bytes stable)."""
+    if isinstance(value, dict):
+        return {k: _sorted(value[k]) for k in sorted(value)}
+    if isinstance(value, list):
+        return [_sorted(v) for v in value]
+    return value
+
+
+GROUP_ITEM_FIRST = ("id", "name")
+
+
+def ordered(data: dict[str, list], packaged: set[str]) -> dict[str, list]:
+    """The datasets with keys sorted, except that a packaged item starts with ``id`` then ``name``.
+
+    The query page shows an item's properties in the order they are stored, so this is what puts
+    ``id`` and ``name`` in the first two columns of every dataset-group item.
+    """
+    out: dict[str, list] = {}
+    for dataset in sorted(data):
+        rows = [
+            {k: _sorted(row[k]) for k in sorted(row)} if isinstance(row, dict) else row
+            for row in data[dataset]
+        ]
+        if dataset in packaged:
+            rows = [
+                {
+                    **{k: row[k] for k in GROUP_ITEM_FIRST if k in row},
+                    **{k: v for k, v in row.items() if k not in GROUP_ITEM_FIRST},
+                }
+                if isinstance(row, dict)
+                else row
+                for row in rows
+            ]
+        out[dataset] = rows
+    return out
+
+
 def build_export() -> dict:
     chats, messages = collect.collect_chats_and_messages()
     agent_to_chat = collect.agent_chat_map()
@@ -270,18 +309,22 @@ def build_export() -> dict:
         if rows
     ]
     extra_queries: list[dict] = []
+    project_sources, claimed_apps = collect.collect_project_datasets()
     sources = (
-        collect.collect_project_datasets()
+        project_sources
         + collect.collect_folder_tables()
-        + collect.collect_app_records()
+        + collect.collect_app_records(claimed_apps)
         + collect.collect_skill_records()
     )
+    packaged: set[str] = set()
     for source in sources:
         name = source["name"]
         if name in data or name in RESERVED_NAMES:
             name = collect.dataset_name(source["group"].split(": ", 1)[-1], name)
         if source["rows"]:
             data[name] = source["rows"]
+            if source.get("packaged"):
+                packaged.add(name)
             extra_queries.append(
                 {
                     "name": f"all {name.replace('_', ' ')}",
@@ -303,17 +346,17 @@ def build_export() -> dict:
     data["datasets"] = catalog
     data["connectors"] = CONNECTORS
     return {
+        "data": ordered(data, packaged),
         "export": DBNAME,
-        "data": data,
-        "queries": build_queries(list(data), extra_queries),
+        "queries": _sorted(build_queries(list(data), extra_queries)),
     }
 
 
 def write_export(path: Path) -> bool:
     """Rebuild the export and write it to ``path`` only when its content changed. Returns whether it did."""
-    body = json.dumps(
-        build_export(), ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    )
+    # Not sort_keys: ``build_export`` already orders every key (``ordered``), and sorting here would
+    # move a group item's ``id`` and ``name`` out of the first two places.
+    body = json.dumps(build_export(), ensure_ascii=False, separators=(",", ":"))
     try:
         if path.read_text(encoding="utf-8") == body:
             return False

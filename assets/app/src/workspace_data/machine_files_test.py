@@ -164,3 +164,12 @@ def test_the_page_reads_contents_through_the_runner(tmp_path: Path) -> None:
     binary = client.get("/contents", query_string={"path": str(tmp_path / "image.bin")})
     assert binary.status_code == 204
     assert "connect_annotator('contents'" in runner.served_dactal_html()
+
+
+def test_a_re_import_drops_what_the_export_no_longer_has() -> None:
+    page = runner.served_dactal_html()
+    # The retire step wraps the import, so it runs before the page's own import adds the new data.
+    assert "dactaldb.remove(name)" in page
+    assert page.index("dactaldb.remove(name)") > page.index("window.linkFilesExport")
+    # A browser that stored its copy before this behavior re-imports once.
+    assert f'.{runner.STORED_COPY_REVISION}"' in page

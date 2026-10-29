@@ -59,7 +59,9 @@ their scaffold step -- do not also scaffold. Take the `update-app` service lease
 
 List the user's own apps (`priority = "user"` in `system/apps/*/app.toml`). For each one whose
 meaningful data lives in code rather than in files (a game's roster, a built-in catalog, a
-rules table), add a `<package>/datasets.py` per `references/project-datasets.md`. Load the
+rules table), add a `<package>/datasets.py` per `references/project-datasets.md`, writing the
+project's data as one nested item (and the app's stored records with it, when they belong to
+the same picture). Load the
 `update-app` skill before touching another app's code. Data already in files (stored records,
 CSV/JSON in the user's folders, data files an app ships) needs nothing: it is picked up as-is.
 
@@ -90,11 +92,11 @@ The launcher entry appears on its own (from the manifest). Add the desktop icon 
 window -- both change what the user sees, so only after step 3 passes:
 
 ```
-python3 system/scripts/layout.py shortcut set workspace-data open --mode focus --cell <next free cell>
-python3 system/scripts/layout.py open workspace-data
+uv run --no-sync workspace-layout shortcut set workspace-data open --mode focus --cell <next free cell>
+uv run --no-sync workspace-layout open workspace-data
 ```
 
-Read the current shortcuts (`layout.py desktops`) to pick the next free cell in the column
+Read the current shortcuts (`uv run --no-sync workspace-layout desktops`) to pick the next free cell in the column
 of built-in shortcuts; never move the user's own icons.
 
 ## The rules this app keeps (do not break them when extending it)
@@ -104,6 +106,15 @@ of built-in shortcuts; never move the user's own icons.
   when that content hash moves, so the user's own saved queries and explorations survive.
 - **Read in place, never copy-and-discard.** The workspace's own files are the raw source;
   every row carries `source` and/or an `open` link back to it.
+- **Package related datasets as one item.** Datasets that belong together -- one project's
+  data, one app's or skill's stored files, a family of files in one folder that share a first
+  word -- are one dataset holding a single item, each member a property with its rows
+  (`pokemon.figures`, `voice_chat.commands`, `workspace.skills_2026_10_16`), not a scatter of
+  look-alike top-level datasets. The collectors do this for files on their own; a project's
+  `datasets.py` does it by writing one item (`references/project-datasets.md`). The item's
+  first two properties are always `id` then `name`; the export keeps them there. Only a lone,
+  unrelated table stays a dataset of its own. Rules and naming: `references/what-gets-exposed.md`,
+  "Packaging related datasets".
 - **Stable join keys, with no hyphens.** A column named after a dataset auto-joins it
   (`messages.chat` -> `chats`); a key used in a clickable link must not contain `-`, because the
   page reads `agent-0d72...` as an expression. Chats are keyed by their id without `agent-`.

@@ -6406,6 +6406,38 @@ async function runTests() {
             ]
         },
         {
+            feature: 'Human list-numbering naturally starts with 1, and so DACTAL does too. But you can get numbers starting with 0, if you must, by using <b>~@</b>.',
+            query: 'artists|x~@',
+            expected: [
+                {
+                    "name": "Nightwish",
+                    "country": "FI",
+                    "x": 0
+                },
+                {
+                    "name": "Flight of Icarus",
+                    "country": "SE",
+                    "x": 1
+                }
+            ]
+        },
+        {
+            feature: 'You can even number in reverse, starting with 0.',
+            query: 'artists|x~@@',
+            expected: [
+                {
+                    "name": "Nightwish",
+                    "country": "FI",
+                    "x": 1
+                },
+                {
+                    "name": "Flight of Icarus",
+                    "country": "SE",
+                    "x": 0
+                }
+            ]
+        },
+        {
             feature: 'An annotation in the form <b>label=>(subquery)</b> also defines <b>label</b> as an alias for <b>(subquery)</b> for the rest of the query.',
             query: `tracks|from=>(.artist.country.id)
 ?tracks2/from`,

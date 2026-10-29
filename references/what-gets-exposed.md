@@ -23,11 +23,11 @@ the tour -- with its row count, a one-line description, and an `open »` link.
 
 | Group | Dataset name | Read from |
 |---|---|---|
-| `project: <app>` | as the project names them | a user-built app's `<package>/datasets.py` (see `project-datasets.md`) |
-| `project: <app>` | `<app>_<path>` | JSON / JSON-lines / CSV / TSV files shipped in a user-built app's folder (build configuration such as `package.json` excluded) |
-| `app: <app>` | `<app>_<file>` | every JSON / JSON-lines file an app keeps under `data/.apps/<app>/` (the chat, browser and terminal stores are machinery and skipped) |
-| `skill: <skill>` | `skill_<skill>_<file>` | every JSON / JSON-lines file a skill keeps under `data/.skills/<skill>/` |
-| `folder: <folder>` | `<folder>_<path>` | every CSV / TSV / JSON / JSON-lines file in the user's visible folders of `data/` |
+| `project: <app>` | as the project names them (one packaged item, e.g. `pokemon`) | a user-built app's `<package>/datasets.py` (see `project-datasets.md`) |
+| `project: <app>` | `<app>` packaged, or `<app>_<path>` for a lone file | JSON / JSON-lines / CSV / TSV files shipped in a user-built app's folder (build configuration such as `package.json` excluded) |
+| `app: <app>` | `<app>` packaged, or `<app>_<file>` for a lone file | every JSON / JSON-lines file an app keeps under `data/.apps/<app>/` (the chat, browser and terminal stores are machinery and skipped; so is an app whose project's `datasets.py` says `includes_app_records`) |
+| `skill: <skill>` | `skill_<skill>` packaged, or `skill_<skill>_<file>` for a lone file | every JSON / JSON-lines file a skill keeps under `data/.skills/<skill>/` |
+| `folder: <folder>` | `<family>` packaged, or `<folder>_<path>` for a file with no family | every CSV / TSV / JSON / JSON-lines file in the user's visible folders of `data/` |
 
 A user-built app is one whose manifest says `priority = "user"` (what the `build-app` scaffold
 writes); built-in apps are left out. Each file is capped at 20 MB and 5000 rows. A name that
@@ -37,6 +37,43 @@ Logins and keys are never exposed: a file whose name looks like one (`token`, `s
 `credential`, `password`, `api_key`, `cookie`, `oauth`, ...) is skipped whole, and a field named
 like one (`access_token`, `client_secret`, `api_key`, `encrypted_*`, ...) is dropped from every
 row, nested ones included (`read_table` in `collect.py`).
+
+## Packaging related datasets
+
+Related datasets are one dataset holding **one item**, each member a property carrying that
+member's rows, instead of several top-level datasets that only a shared name prefix ties
+together. The group then reads as one thing in the catalog and in queries:
+
+```
+pokemon.figures#-expected_damage          # one member's rows
+pokemon.current_duel.figures              # into a nested record
+voice_chat.commands
+workspace.skills_2026_10_16:criticality>=3
+```
+
+What counts as related, and what the item is called (`collect.py`, `_packaged`):
+
+- **An app's or skill's stored files**: two or more under `data/.apps/<app>/` become
+  `<app>` (`voice_chat` with `client_log` and `commands`); a skill's become `skill_<skill>`.
+- **A family of files in one folder**: files in the same folder whose names start with the
+  same word (split on `-`, `_`, `.`, space) become one item named after that word, each member
+  named for the rest of its file name (`documents/workspace-skills-2026-10-16.json` ->
+  `workspace.skills_2026_10_16`). A member name that would start with a digit gets `part_` in
+  front.
+- **A project's data**: its `datasets.py` writes the item itself, and can take in the app's
+  stored records too (`includes_app_records`), so the game's figures and its saved duels are one
+  `pokemon` item. Data files a project ships are packaged as `<app>` when there are several.
+- A lone file, or files with nothing in common, stay datasets of their own.
+
+Every group item starts with `id` then `name` (a short label: the app, skill or family, or the
+project's own title), followed by its members. The query page shows properties in the order they
+are stored, and the export stores every other key sorted, so `export.ordered` puts these two
+first for every packaged dataset -- the collectors' (`"packaged": True`) and any project dataset
+that is one row holding nested records (`collect.is_group_item`).
+
+When you add data by hand or in a new collector, follow the same rule: one item per related
+group, named for the thing the group is about, never a set of `<thing>_<part>` datasets. The
+item's `about` names its members; its `source` is the folder or module it came from.
 
 ## The saved views
 
