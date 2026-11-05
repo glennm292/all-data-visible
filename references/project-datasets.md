@@ -41,6 +41,9 @@ stdout:
   the app itself uses, so both always agree -- nest them in the item as the app stored them, and
   set `"includes_app_records": true`. The Data app then stops listing those files as an `app:`
   dataset of their own, and rebuilds the item whenever they change.
+- Build every row in a logical property order: `id`, `name`, then what describes the thing,
+  then derived numbers, then links. The Data app keeps the order you write (only `id` and `name`
+  are pulled to the front) and never alphabetizes, so do not sort keys yourself.
 - Every row gets a stable `id` with no hyphens (a key used in a clickable link must not contain
   `-`; replace it with `_` and keep the original in another column).
 - Put derived numbers in the rows (odds, averages, scores) and say in a view's `???note` how

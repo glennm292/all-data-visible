@@ -69,10 +69,10 @@ What counts as related, and what the item is called (`collect.py`, `_packaged`):
 
 Every group item starts with `id` then `name` (a short label: the app, skill or family, or the
 project's own title), followed by its members. The query page shows properties in the order they
-are stored, and the export stores every other key sorted, so `export.ordered` puts these two
-first for every packaged dataset -- the collectors' (`"packaged": True`) and any project dataset
-that is one object holding nested records (`collect.is_group_item`) -- and writes each one out as
-that object. Internally the collectors still carry it as a one-item list; only `export.ordered`
+are stored, so the export keeps every object's properties in the order they were built, with `id`
+and `name` pulled to the front at every level (`export.logical`) -- never alphabetized. It writes
+every packaged dataset -- the collectors' (`"packaged": True`) and any project dataset that is one
+object holding nested records (`collect.is_group_item`) -- out as that object. Internally the collectors still carry it as a one-item list; only `export.ordered`
 decides the written shape.
 
 When you add data by hand or in a new collector, follow the same rule: one object per related

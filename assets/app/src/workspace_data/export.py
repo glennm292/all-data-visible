@@ -238,38 +238,40 @@ def _uses_present(query: str, present: set[str]) -> bool:
     return head in present or head not in DATASET_ABOUT
 
 
-def _sorted(value: object) -> object:
-    """Every object's keys in sorted order, all the way down (what makes the export's bytes stable)."""
+FIRST_PROPERTIES = ("id", "name")
+
+
+def logical(value: object) -> object:
+    """Every object with ``id`` then ``name`` first and its other properties in the order they were made.
+
+    The query page shows properties in the order they are stored. Every collector and project builds
+    its rows in a deliberate order (what a thing is, then what describes it, then links), so that
+    order is kept rather than alphabetized; only ``id`` and ``name`` are pulled to the front, all the
+    way down. The export's bytes stay stable because the collectors build their rows the same way
+    every time.
+    """
     if isinstance(value, dict):
-        return {k: _sorted(value[k]) for k in sorted(value)}
+        return {
+            **{k: logical(value[k]) for k in FIRST_PROPERTIES if k in value},
+            **{k: logical(v) for k, v in value.items() if k not in FIRST_PROPERTIES},
+        }
     if isinstance(value, list):
-        return [_sorted(v) for v in value]
+        return [logical(v) for v in value]
     return value
 
 
-GROUP_ITEM_FIRST = ("id", "name")
-
-
 def ordered(data: dict[str, list], packaged: set[str]) -> dict[str, list | dict]:
-    """The datasets with keys sorted; a packaged dataset is written as its one item, a plain object.
+    """The datasets in name order, each in ``logical`` property order; a packaged dataset as its one object.
 
     A group of related datasets is one object whose properties are its members, not a list holding
     that object: the query page loads an object-valued dataset as itself, so ``pokemon.figures``
-    reads the same either way, but the export then says what the group is. The query page shows an
-    item's properties in the order they are stored, so the object starts with ``id`` then ``name``.
+    reads the same either way, but the export then says what the group is.
     """
     out: dict[str, list | dict] = {}
     for dataset in sorted(data):
-        rows = [
-            {k: _sorted(row[k]) for k in sorted(row)} if isinstance(row, dict) else row
-            for row in data[dataset]
-        ]
+        rows = [logical(row) for row in data[dataset]]
         if dataset in packaged and len(rows) == 1 and isinstance(rows[0], dict):
-            item = rows[0]
-            out[dataset] = {
-                **{k: item[k] for k in GROUP_ITEM_FIRST if k in item},
-                **{k: v for k, v in item.items() if k not in GROUP_ITEM_FIRST},
-            }
+            out[dataset] = rows[0]
         else:
             out[dataset] = rows
     return out
@@ -347,14 +349,14 @@ def build_export() -> dict:
     return {
         "data": ordered(data, packaged),
         "export": DBNAME,
-        "queries": _sorted(build_queries(list(data), extra_queries)),
+        "queries": logical(build_queries(list(data), extra_queries)),
     }
 
 
 def write_export(path: Path) -> bool:
     """Rebuild the export and write it to ``path`` only when its content changed. Returns whether it did."""
-    # Not sort_keys: ``build_export`` already orders every key (``ordered``), and sorting here would
-    # move a group item's ``id`` and ``name`` out of the first two places.
+    # Not sort_keys: ``build_export`` already puts every object's properties in their logical order
+    # (``logical``), and sorting here would alphabetize them.
     body = json.dumps(build_export(), ensure_ascii=False, separators=(",", ":"))
     try:
         if path.read_text(encoding="utf-8") == body:

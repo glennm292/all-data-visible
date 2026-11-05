@@ -119,6 +119,15 @@ of built-in shortcuts; never move the user's own icons.
   `name`; the export keeps them there. Only a lone,
   unrelated table stays a dataset of its own. Rules and naming: `references/what-gets-exposed.md`,
   "Packaging related datasets".
+- **Properties in a logical order, never alphabetical.** The query page shows an item's
+  properties in the order they are stored, so that order is part of what the user sees. Every
+  item -- a row, a nested record, a group object -- starts with `id` then `name` (or the
+  thing's title where it has one instead of a name), followed by what describes it, then
+  derived numbers, then links and bookkeeping (`ts`, `source`, `open`). Build each row's dict in
+  that order; the export keeps it (`export.logical`) and only pulls `id` and `name` to the
+  front. Never sort keys (no `sort_keys=True`, no `sorted(row)`) -- the export stays
+  byte-stable because the collectors build their rows the same way every time. Files read from
+  the user's folders keep their own column order.
 - **Stable join keys, with no hyphens.** A column named after a dataset auto-joins it
   (`messages.chat` -> `chats`); a key used in a clickable link must not contain `-`, because the
   page reads `agent-0d72...` as an expression. Chats are keyed by their id without `agent-`.

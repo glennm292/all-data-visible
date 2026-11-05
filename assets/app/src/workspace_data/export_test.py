@@ -385,10 +385,21 @@ def test_a_group_items_id_and_name_are_its_first_two_properties(
     data = json.loads(target.read_text(encoding="utf-8"))["data"]
     assert list(data["planner"]) == ["id", "name", "hotels", "trips"]
     assert data["planner"]["name"] == "planner"
-    assert list(data["demo"]) == ["id", "name", "figures", "moves"]
-    # Every other row keeps its keys sorted, so the export's bytes stay stable.
+    # id and name are pulled to the front; the members keep the order the project wrote them in.
+    assert list(data["demo"]) == ["id", "name", "moves", "figures"]
+    # Every other object keeps the order it was built in, never alphabetized: a CSV keeps its
+    # column order, and id and name come first at every level.
     assert list(data["demo"]["figures"][0]) == ["id"]
-    assert list(data["my_project_budget"][0]) == ["cost", "item"]
+    assert list(data["my_project_budget"][0]) == ["item", "cost"]
+    assert list(data["files"][0])[:2] == ["id", "name"]
+
+
+def test_properties_keep_their_built_order_with_id_and_name_first() -> None:
+    rows = [{"zeta": 1, "name": "N", "alpha": {"b": 1, "id": "x", "a": 2}, "id": "r1"}]
+    row = export.logical(rows[0])
+    assert isinstance(row, dict)
+    assert list(row) == ["id", "name", "zeta", "alpha"]
+    assert list(row["alpha"]) == ["id", "b", "a"]
 
 
 def test_scheduled_jobs_list_every_routine_with_its_switch_and_last_success(
