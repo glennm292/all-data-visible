@@ -17,7 +17,7 @@ the tour -- with its row count, a one-line description, and an `open »` link.
 | `memories` | memory note | `data/memories/*.md` frontmatter + body | `open note »` |
 | `apps` | app the user can open | `data/.state/apps.toml` (not `internal`) | `open … »` opens the app |
 | `skills` | skill, `made_by` you or built in (`author: imbue`) | `.agents/skills/*/SKILL.md` | `view raw »` renders the SKILL.md |
-| `scheduled_jobs` | runner job | `data/.state/jobs/*/last_success` | |
+| `scheduled_jobs` | routine | `system/routines/<id>.toml` and `data/.state/routines/<id>/state.json` (plus an unmigrated older job's `data/.state/jobs/*/last_success`) | `open` opens it in the Routines app |
 
 ## All the data of the user's own projects
 
@@ -40,9 +40,11 @@ row, nested ones included (`read_table` in `collect.py`).
 
 ## Packaging related datasets
 
-Related datasets are one dataset holding **one item**, each member a property carrying that
-member's rows, instead of several top-level datasets that only a shared name prefix ties
-together. The group then reads as one thing in the catalog and in queries:
+Related datasets are one dataset whose value is **one plain object** (not a list holding an
+object), each member a property of that root object carrying that member's rows, instead of
+several top-level datasets that only a shared name prefix ties together. In the export:
+`"voice_chat": {"id": "voice_chat", "name": "voice_chat", "client_log": [...], "commands": [...]}`.
+DACTAL loads an object-valued dataset as itself, so the queries below are unchanged. The group then reads as one thing in the catalog and in queries:
 
 ```
 pokemon.figures#-expected_damage          # one member's rows
@@ -56,7 +58,7 @@ What counts as related, and what the item is called (`collect.py`, `_packaged`):
 - **An app's or skill's stored files**: two or more under `data/.apps/<app>/` become
   `<app>` (`voice_chat` with `client_log` and `commands`); a skill's become `skill_<skill>`.
 - **A family of files in one folder**: files in the same folder whose names start with the
-  same word (split on `-`, `_`, `.`, space) become one item named after that word, each member
+  same word (split on `-`, `_`, `.`, space) become one object named after that word, each member
   named for the rest of its file name (`documents/workspace-skills-2026-10-16.json` ->
   `workspace.skills_2026_10_16`). A member name that would start with a digit gets `part_` in
   front.
@@ -69,9 +71,11 @@ Every group item starts with `id` then `name` (a short label: the app, skill or 
 project's own title), followed by its members. The query page shows properties in the order they
 are stored, and the export stores every other key sorted, so `export.ordered` puts these two
 first for every packaged dataset -- the collectors' (`"packaged": True`) and any project dataset
-that is one row holding nested records (`collect.is_group_item`).
+that is one object holding nested records (`collect.is_group_item`) -- and writes each one out as
+that object. Internally the collectors still carry it as a one-item list; only `export.ordered`
+decides the written shape.
 
-When you add data by hand or in a new collector, follow the same rule: one item per related
+When you add data by hand or in a new collector, follow the same rule: one object per related
 group, named for the thing the group is about, never a set of `<thing>_<part>` datasets. The
 item's `about` names its members; its `source` is the folder or module it came from.
 

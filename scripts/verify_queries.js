@@ -39,6 +39,9 @@ if (!enginePath || !exportPath) {
 // The engine attaches its singleton to window.DACTAL when loaded in a browser;
 // shim window to global so the same file loads in Node.
 global.window = global;
+// The engine logs as it works (e.g. "loading non-array into dataset ..." for an
+// object-valued dataset); send that to stderr so stdout stays the JSON report.
+console.log = (...args) => console.error(...args);
 require(path.resolve(enginePath));
 const DACTAL = global.window.DACTAL.constructor;
 
@@ -82,6 +85,9 @@ async function run() {
     // A fresh engine per query so labels (`??`) and "current results" from one
     // query cannot bleed into the next.
     const d = new DACTAL();
+    // The query page defines a global `dactal`, and parts of the engine read it
+    // (e.g. the `datasets` lookup); give it the same global.
+    global.dactal = d;
     for (const [name, value] of Object.entries(data)) {
       const rows = resolveDataset(value);
       if (rows != null) d.load(rows, name);

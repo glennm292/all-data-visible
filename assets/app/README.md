@@ -24,18 +24,18 @@ Check every saved query against the real engine with
 Data that lives in a project's code (a game's roster, a built-in catalog) reaches the Data app
 through a `datasets.py` module in the project's package (`system/apps/<app>/src/<package>/`).
 Run as `python -m <package>.datasets` under the root venv, it writes to stdout one packaged item
-per project (its collections as properties of a single row), its saved views, and whether it
+per project (its collections as properties of a single object), its saved views, and whether it
 takes in the app's own stored records:
 
 ```json
-{"datasets": {"<thing>": {"about": "<one line>", "rows": [{"id": "<thing>", "<part>": [{"id": "..."}]}]}},
+{"datasets": {"<thing>": {"about": "<one line>", "item": {"id": "<thing>", "name": "<Title>", "<part>": [{"id": "..."}]}}},
  "queries": [{"name": "<saved view>", "query": "<thing>.<part>#...", "hide": ["<column>"]}],
  "includes_app_records": true}
 ```
 
 Related datasets are always packaged this way -- an app's or skill's several stored files, a
 family of files in one folder sharing a first word, and a project's own data -- so each group is
-one dataset of one item (`pokemon.figures`, `voice_chat.commands`). Output is cached until the
+one dataset whose value is one object (`pokemon.figures`, `voice_chat.commands`). Output is cached until the
 package's Python or the app's stored records change.
 `system/apps/pokemon_duel/src/pokemon_duel/datasets.py` is the example; the rules are in the
 skill's `references/project-datasets.md` and `references/what-gets-exposed.md`.

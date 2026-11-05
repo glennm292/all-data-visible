@@ -20,8 +20,11 @@ An explorer is one self-contained JSON file:
 
 - **`export`** — the database name. The stock front-end loads it from
   `/data/<dbname>.json` on the page origin and opens with `dactal.html?dbname=<dbname>`.
-- **`data`** — a map of dataset name → array of row objects. Each row is a plain
-  object; give every row a stable `id`. The special **`connectors`** dataset lists
+- **`data`** — a map of dataset name → array of row objects, or → a single plain
+  object for a dataset that is one thing with parts (a group of related collections:
+  `{"id": ..., "name": ..., "figures": [...], "moves": [...]}`). DACTAL loads an object
+  value as that one item, so `pokemon.figures` works on it; do not wrap such an object
+  in a one-element array. Each row is a plain object; give every row a stable `id`. The special **`connectors`** dataset lists
   the renderer/data connectors to load (see connectors-and-viz.md).
 - A dataset value may also be a **filename string** instead of an inline array;
   the front-end then loads it from `/data/<filename>` on the same origin. A

@@ -19,7 +19,7 @@ class DACTAL {
         this.recache = false;
         this.timelimit = 120000;
         this.statusf = (statusmsg) => {if (statusmsg) console.log(statusmsg)};
-        this.internal_datasets = ['queries', 'query history', 'connectors', 'adapters', 'annotators', 'current results', 'data updates', 'assistance'];
+        this.internal_datasets = ['queries', 'query history', 'connectors', 'adapters', 'annotators', 'renderers', 'current results', 'data updates', 'assistance'];
 
         this.annotators = {
             group: (item) => item.of,
@@ -55,6 +55,8 @@ class DACTAL {
             log: (item) => Math.log(this.numvals(item)[0]),
             log10: (item) => Math.log10(this.numvals(item)[0]),
             abs: (item) => Math.abs(this.numvals(item)[0]),
+            inc: (item) => this.numvals(item).map((n) => n + 1),
+            dec: (item) => this.numvals(item).map((n) => n - 1),
             is: (item) => (item.of?.length > 0) ? 1 : 0,
             isnt: (item) => (item.of?.length === 0) ? 1 : 0,
             yesno: (item) => (item.of?.length > 0) ? 'yes' : 'no', 
@@ -319,6 +321,11 @@ class DACTAL {
                 const keys = lines[0];
                 return lines.slice(1).map((vals) => Object.fromEntries(vals.map((val, vi) => [keys[vi], val])));
             },
+            lines: (item) => {
+                const text = this.getname(item);
+                const lines = text.split('\n').map((line) => line.trim()).filter((line) => line != '');
+                return lines;
+            },
             json: (item) => this.vals(item).flatMap((v) => JSON.parse(v)),
             year: (item) => {
                 if (item.date?.toString()?.length > 0) return item.date?.[0]?.toString()?.match(/\d\d\d\d/)?.[0];
@@ -474,9 +481,9 @@ class DACTAL {
             lowercase: (item) => this.vals(item).flatMap((v) => v.toString().toLowerCase().replaceAll(/[‘’`]/g, "'").replaceAll(/[“”]/g, '"')),
             list: (item) => this.kkeys(item),
             items: (item) => item?.of?.flatMap((typename) => this.data?.[this.getname(typename)]),
-            traverse: (item) => {
+            traverse: (item, labeled) => {
                 const props = this.vals(item);
-                return item?.of?.flatMap((subitem) => props.flatMap((prop) => this.step(subitem, prop, null, {})));
+                return item?.of?.flatMap((subitem) => props.flatMap((prop) => this.step(subitem, prop.toString(), null, labeled)));
             },
             random: (item) => Math.random(),
             shuffle: (item) => {
@@ -909,10 +916,6 @@ class DACTAL {
             outputlist = [];
             switch (op.operator) {
                 case '?': // start
-                    if (op.args.length == 0) {
-                        outputlist = Object.keys(this.data).filter((x) => !this.internal_datasets.includes(x)).sort((a, b) => dethe(a).localeCompare(dethe(b)));
-                        break;
-                    }
                     outputlist = [];
                     op.args.forEach((arg) => {
                         let startitems = [];
@@ -933,6 +936,8 @@ class DACTAL {
                                 startitems = this.execute(arg.subop?.includes('+') ? outputlist : [], arg.value, labeled);
                             } else if (arg.subop == '~') {
                                 startitems = [arg.value];
+                            } else if (dtype(arg.value, 'string') && arg.value.match(/^=./)) {
+                                startitems = this.step({}, arg.value, null, labeled);
                             } else if (arg.value in labeled) {
                                 startitems = labeled[arg.value];
                             } else if (typeitems = this.gettype(arg.value)) {
@@ -948,7 +953,7 @@ class DACTAL {
                             if (arg.subop?.includes('+')) {
                                 if (arg.label) {
                                     startitems.forEach((i) => {
-                                        if (arg.label in labeled) (labeled[arg.label] ||= []).push(i);
+                                        (labeled[arg.label] ||= []).push(i);
                                         outputlist.push(i);
                                     });
                                 } else {
@@ -993,7 +998,12 @@ class DACTAL {
                                 //     labeled[arg.label] = arg.labeled;
                                 } else {
                                     if (arg.subop?.match(/\+/)) labeled[arg.label] ||= [];
-                                    const newvals = this.execute(currentlist, Array.isArray(arg.value) ? arg.value : '.' + arg.value, labeled, level);
+                                    let newvals;
+                                    if (Array.isArray(arg.value)) {
+                                        newvals = this.execute(currentlist, arg.value, labeled, level);
+                                    } else if (dtype(arg.value, 'string') && arg.value.match(/^=./)) {
+                                        newvals = this.step({}, arg.value, null, labeled);
+                                    }
                                     if (arg.subop?.match(/\+/)) {
                                         newvals.forEach((nv) => labeled[arg.label].push(nv));
                                     } else if (arg.subop?.includes('-') && labeled[arg.label]) {
@@ -1264,7 +1274,7 @@ class DACTAL {
                                 });
 
                                 let argvals;
-                                if (Array.isArray(arg.value) || arg.value?.startsWith('=')) {
+                                if (Array.isArray(arg.value) || arg.value?.match(/^=./)) {
                                     const argvalitems = this.step(item, arg.value, null, labeled);
                                     argvals = argvalitems.map((argvalitem) => {
                                         let argval;
@@ -1703,7 +1713,7 @@ class DACTAL {
                                 const firstitem = currentlist[0];
                                 const isprop = typeof firstitem == 'object' && prop in firstitem;
                                 if ((arg.subop == '=' || !isprop) && arg.subop != '~' && aggname in this.annotators) {
-                                    const aggval = this.annotators[aggname](tempitem);
+                                    const aggval = this.annotators[aggname](tempitem, labeled);
                                     const agglabel = arg.label || aggname;
                                     if (aggval != null) finalitem[agglabel] = aggval;
                                     aggregated = agglabel;
@@ -1762,7 +1772,7 @@ class DACTAL {
                                         } else {
                                             propitems = propres;
                                         }
-                                    } else if (arg.value?.startsWith('=')) {
+                                    } else if (arg.value?.match(/^=./)) {
                                         const mathres = this.step(tempitem.of, arg.value, arg.subop, labeled);
                                         if (mathres.length > 0) propitems = mathres[0];
                                     } else {
@@ -1852,7 +1862,7 @@ class DACTAL {
                                 } else {
                                     if (!arg.label && arg.value && typeof arg.value === 'string' && arg.value != '') {
                                         if (arg.subop == '=' && arg.value in this.annotators) {
-                                            item[arg.value] = this.annotators[arg.value](item);
+                                            item[arg.value] = this.annotators[arg.value](item, labeled);
                                         } else if (arg.value in item) {
                                             const moveprop = arg.value;
                                             const value = item[moveprop];
@@ -1887,7 +1897,7 @@ class DACTAL {
                                         } else {
                                             vals = step(item, arg.value, arg.subop, labeled);
                                         }
-                                        const scalar = arg.subop?.includes('~') || arg.subop?.endsWith('@') || (arg.label != '_' && arg.subop == '=' && typeof arg.value == 'string' && (arg.value in this.annotators || arg.value.startsWith('=') || arg.value.startsWith('~')));
+                                        const scalar = arg.subop?.includes('~') || arg.subop?.endsWith('@') || (arg.label != '_' && arg.subop == '=' && typeof arg.value == 'string' && (arg.value in this.annotators || arg.value.match(/^=./) || arg.value.startsWith('~')));
                                         const base = (arg.subop?.endsWith('+') && arg.label in item && Array.isArray(item[arg.label])) ? item[arg.label] : [];
                                         if (arg.label == '_') {
                                             const sourceitem = dtype(vals, 'array') ? vals[0] : val;
@@ -1955,6 +1965,9 @@ class DACTAL {
 
     gettype(value) {
         if (value == null || value == undefined) return null;
+        if ((value == 'datasets' && !dactal.data.datasets) || value == '_datasets') {
+            return Object.keys(this.data).filter((d) => !this.internal_datasets.includes(d)).sort((a, b) => this.dethe(a).localeCompare(this.dethe(b)));
+        }
         const trylist = [value];
         if (this.features.plurality) {
             if (value.endsWith('s')) {
@@ -1989,7 +2002,7 @@ class DACTAL {
 
     dcopy = (item) => {
         if (item === null || typeof item !== 'object') return item;
-        if (Array.isArray(item)) return item.slice();
+        if (Array.isArray(item)) return item.slice(0);
         return {...item};
     }
         
@@ -2091,6 +2104,9 @@ class DACTAL {
         return o;
     }
     
+    mathwords = Object.getOwnPropertyNames(Math).filter((mathword) => mathword.match(/^[a-z0-9]+$/)).sort((a, b) => b.length - a.length || a.localeCompare(b));
+    otherwords = ['split'];
+
     step = (item, property, subop, labeled) => {
         // (this.data.trace ??= []).push({stepitem: item, property: property, subop: subop, labeled: labeled});
         const dtype = this.dtype;
@@ -2117,15 +2133,13 @@ class DACTAL {
             vals.push(item);
         } else if (property == 'name') {
             vals.push(this.getname(item));
-        } else if (this.features.inlinemath && property.startsWith('=')) {
+        } else if (this.features.inlinemath && property.match(/^=./)) {
             let calculation = property.slice(1);
-            const mathwords = Object.getOwnPropertyNames(Math).filter((mathword) => mathword.match(/^[a-z0-9]+$/)).sort((a, b) => b.length - a.length || a.localeCompare(b));
-            const otherwords = ['split'];
-            const variables = Object.entries(item).concat(Object.entries(labeled))
+            const variables = dtype(item, 'literal') ? [] : Object.entries(item).concat(Object.entries(labeled))
                 .map(([k, v]) => k)
                 .sort((a, b) => b.length - a.length || a.localeCompare(b));
             if (dtype(this.getname(item), 'number')) variables.push('_');
-            const allowedwords = mathwords.concat(otherwords).concat(variables).sort((a, b) => b.length - a.length || a.localeCompare(b));
+            const allowedwords = this.mathwords.concat(this.otherwords).concat(variables).sort((a, b) => b.length - a.length || a.localeCompare(b));
             const allowed = new RegExp(`^((\\b(${allowedwords.map((w) => escapeRegExp(w)).join('|')})\\b)|([0-9_\\+\\/\\*\\(\\)\\[\\]\\.%=,'" -]*))*$`);
             let val;
             if (calculation.match(allowed)) {
@@ -2138,7 +2152,7 @@ class DACTAL {
                     }
                 }
                 if (calculation.match(/[A-Za-z]/)) {
-                    for (const mathword of mathwords) {
+                    for (const mathword of this.mathwords) {
                         const mathwordex = new RegExp(`\\b${mathword}\\b`, 'g');
                         calculation = calculation.replaceAll(mathwordex, `Math.${mathword}`);
                         if (!calculation.match(/[A-Za-z]/)) break;

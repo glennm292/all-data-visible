@@ -28,6 +28,12 @@ SKILLS_DIR = Path(".agents/skills")
 APP_REGISTRY = WORKSPACE_DATA / ".state" / "apps.toml"
 TICKETS_DIR = Path(os.environ.get("TICKETS_DIR", str(WORKSPACE_DATA / ".tickets")))
 CHAT_STORE = WORKSPACE_DATA / ".apps" / "chat" / "chats"
+# Scheduled things are routines: a definition per routine under system/routines, and what the runner knows about
+# each under data/.state/routines/<id>/state.json. JOBS_DIR is the older runner's state, read for a workspace
+# whose jobs were never migrated.
+ROUTINE_DEFINITIONS_DIR = Path("system/routines")
+ROUTINE_STATE_DIR = WORKSPACE_DATA / ".state" / "routines"
+ROUTINES_APP = "routines"
 JOBS_DIR = WORKSPACE_DATA / ".state" / "jobs"
 MNGR_HOST_DIR = Path(os.environ.get("MNGR_HOST_DIR", "/home/user/.mngr"))
 
@@ -552,10 +558,68 @@ def collect_skills() -> list[dict]:
     return rows
 
 
-def collect_scheduled_jobs() -> list[dict]:
+def _routine_state(routine_id: str) -> dict:
+    try:
+        state = json.loads(
+            (ROUTINE_STATE_DIR / routine_id / "state.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _iso_timestamp(value: object) -> float | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except ValueError:
+        return None
+
+
+def _routine_rows() -> list[dict]:
     rows = []
+    definitions = (
+        sorted(ROUTINE_DEFINITIONS_DIR.glob("*.toml"))
+        if ROUTINE_DEFINITIONS_DIR.is_dir()
+        else []
+    )
+    for definition_path in definitions:
+        try:
+            definition = tomllib.loads(definition_path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        routine_id = definition_path.stem
+        state = _routine_state(routine_id)
+        is_enabled = state.get("is_enabled")
+        if not isinstance(is_enabled, bool):
+            is_enabled = bool(definition.get("enabled", True))
+        last_ts = _iso_timestamp(state.get("last_succeeded_at"))
+        last_run = state.get("last_run")
+        rows.append(
+            {
+                "id": routine_id,
+                "title": definition.get("title", routine_id),
+                "what": definition.get("what", ""),
+                "every": definition.get("every") or definition.get("once") or "",
+                "at": definition.get("at", ""),
+                "enabled": is_enabled,
+                "last_success": _when(last_ts) if last_ts else "never",
+                "last_outcome": last_run.get("outcome", "")
+                if isinstance(last_run, dict)
+                else "",
+                "ts": int(last_ts or 0),
+                "open": open_link(ROUTINES_APP, f"/{routine_id}", "open in Routines »"),
+            }
+        )
+    return rows
+
+
+def collect_scheduled_jobs() -> list[dict]:
+    rows = _routine_rows()
+    listed = {row["id"] for row in rows}
     for job_dir in sorted(JOBS_DIR.iterdir()) if JOBS_DIR.is_dir() else []:
-        if not job_dir.is_dir():
+        if not job_dir.is_dir() or job_dir.name in listed:
             continue
         last = job_dir / "last_success"
         try:
@@ -960,8 +1024,15 @@ def _run_provider(app: str, package: str, package_dir: Path) -> tuple[list[dict]
     claims = isinstance(payload, dict) and payload.get("includes_app_records") is True
     if isinstance(payload, dict) and isinstance(payload.get("datasets"), dict):
         for name, spec in payload["datasets"].items():
-            if isinstance(spec, dict) and isinstance(spec.get("rows"), list):
-                rows = [r for r in spec["rows"] if isinstance(r, dict)][:TABLE_MAX_ROWS]
+            if not isinstance(spec, dict):
+                continue
+            # A group of collections comes as one object (``item``); it is kept as a one-item list until
+            # the export writes it back out as the object (``export.ordered``).
+            given = spec.get("item", spec.get("rows"))
+            if isinstance(given, dict):
+                given = [given]
+            if isinstance(given, list):
+                rows = [r for r in given if isinstance(r, dict)][:TABLE_MAX_ROWS]
                 out.append(
                     {
                         **_source(

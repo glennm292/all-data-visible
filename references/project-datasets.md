@@ -17,7 +17,7 @@ stdout:
 {
   "datasets": {
     "<thing>": {"about": "<one line a person reads>",
-                "rows": [{"id": "<thing>", "<part>": [{"id": "...", "...": "..."}], "...": "..."}]}
+                "item": {"id": "<thing>", "name": "<Title>", "<part>": [{"id": "...", "...": "..."}]}}
   },
   "queries": [
     {"name": "<saved view>", "query": "<DACTAL query>", "hide": ["<column>"]}
@@ -26,10 +26,13 @@ stdout:
 }
 ```
 
-- **Package the project's data as one item.** Write one dataset, named for what the project is
-  about (`pokemon`), holding a single row whose properties are the project's collections
-  (`figures`, `moves`, `finished_duels`, `current_duel`), each a list of rows -- or one nested
-  record, when there is only one. Its first two properties are `id` and `name` (a readable
+- **Package the project's data as one object.** Write one dataset, named for what the project
+  is about (`pokemon`), given as `item`: a single plain object whose properties are the
+  project's collections (`figures`, `moves`, `finished_duels`, `current_duel`), each a list of
+  rows -- or one nested record, when there is only one. The collections are properties of that
+  root object itself; do not wrap the object in a list (`"rows": [item]`), which makes the
+  export read as a table of one row. The export writes the object as the dataset's value.
+  `rows` (a list) is for a plain table that is not a group. Its first two properties are `id` and `name` (a readable
   title, `"Pokemon Duel"`); the Data app keeps them first. Do not write a set of `<thing>_<part>` datasets: the group
   reads as one thing (`pokemon.figures`), and the catalog lists the project once. This is the
   workspace-wide rule (`what-gets-exposed.md`, "Packaging related datasets").
@@ -93,7 +96,7 @@ def build_datasets() -> dict:
     item = {"id": "demo", "name": "Demo Game", "figures": figures, "moves": moves,
             "finished_matches": _finished_matches()}
     return {
-        "datasets": {"demo": {"about": "All of Demo Game's data in one item.", "rows": [item]}},
+        "datasets": {"demo": {"about": "All of Demo Game's data in one object.", "item": item}},
         "queries": [{
             "name": "demo figures by expected damage",
             "query": "demo.figures#-expected_damage"

@@ -250,29 +250,28 @@ def _sorted(value: object) -> object:
 GROUP_ITEM_FIRST = ("id", "name")
 
 
-def ordered(data: dict[str, list], packaged: set[str]) -> dict[str, list]:
-    """The datasets with keys sorted, except that a packaged item starts with ``id`` then ``name``.
+def ordered(data: dict[str, list], packaged: set[str]) -> dict[str, list | dict]:
+    """The datasets with keys sorted; a packaged dataset is written as its one item, a plain object.
 
-    The query page shows an item's properties in the order they are stored, so this is what puts
-    ``id`` and ``name`` in the first two columns of every dataset-group item.
+    A group of related datasets is one object whose properties are its members, not a list holding
+    that object: the query page loads an object-valued dataset as itself, so ``pokemon.figures``
+    reads the same either way, but the export then says what the group is. The query page shows an
+    item's properties in the order they are stored, so the object starts with ``id`` then ``name``.
     """
-    out: dict[str, list] = {}
+    out: dict[str, list | dict] = {}
     for dataset in sorted(data):
         rows = [
             {k: _sorted(row[k]) for k in sorted(row)} if isinstance(row, dict) else row
             for row in data[dataset]
         ]
-        if dataset in packaged:
-            rows = [
-                {
-                    **{k: row[k] for k in GROUP_ITEM_FIRST if k in row},
-                    **{k: v for k, v in row.items() if k not in GROUP_ITEM_FIRST},
-                }
-                if isinstance(row, dict)
-                else row
-                for row in rows
-            ]
-        out[dataset] = rows
+        if dataset in packaged and len(rows) == 1 and isinstance(rows[0], dict):
+            item = rows[0]
+            out[dataset] = {
+                **{k: item[k] for k in GROUP_ITEM_FIRST if k in item},
+                **{k: v for k, v in item.items() if k not in GROUP_ITEM_FIRST},
+            }
+        else:
+            out[dataset] = rows
     return out
 
 
