@@ -9,7 +9,8 @@ Change it there, not here: re-running the skill's installer replaces this folder
   scheduled jobs), plus all the data of the user's own projects: every app's and skill's
   stored JSON/JSON-lines records, every CSV/TSV/JSON file in the user's folders, the data
   files a user-built app ships, and what a user-built app hands over itself (below).
-- `export.py` assembles them, with the saved queries and the narrated tour, into the one
+- `export.py` assembles them, with the saved queries (the built-in ones and the views people
+  saved on the page, kept in `saved_views.json` so every browser shares them) and the narrated tour, into the one
   export `data/.apps/workspace-data/data/workspace.json`, written only when its content
   changed.
 - `runner.py` serves the stock query page (`assets/dactal.html`, pulled with the skill's

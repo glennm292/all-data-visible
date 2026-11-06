@@ -65,6 +65,15 @@ MACHINE_FILES_CACHE = (
     Path(os.environ.get("WORKSPACE_DATA_DATA_DIR", "data/.apps/workspace-data"))
     / "machine_files.json"
 )
+# The views people save on the query page, kept by the workspace so every browser, tab and person
+# using it sees the same ones (the page's own storage is private to one browser).
+SAVED_VIEWS_PATH = (
+    Path(os.environ.get("WORKSPACE_DATA_DATA_DIR", "data/.apps/workspace-data"))
+    / "saved_views.json"
+)
+# What a saved view is; anything else the page keeps on one (its cached results, its run time)
+# stays in that browser.
+SAVED_VIEW_FIELDS = ("name", "tag", "order", "query", "hide", "relative")
 # Dataset names the export uses itself; a project dataset with one of them is renamed.
 RESERVED_NAMES = frozenset(
     {"datasets", "connectors", "queries", "adapters", "annotators"}
@@ -223,13 +232,54 @@ def build_queries(dataset_names: list[str], extra_queries: list[dict]) -> list[d
     ]
     queries.extend(extra_queries)
     present = set(dataset_names)
+    queries = [q for q in queries if _uses_present(q["query"], present)]
+    # Views people saved replace a built-in view of the same name and follow the rest.
+    saved = load_saved_views()
+    saved_names = {view["name"] for view in saved}
+    queries = [q for q in queries if q["name"] not in saved_names] + saved
     # The stock front-end reads every saved query's ``hide`` and ``order`` and breaks on a query
     # that lacks them, so each one carries both, empty when unused.
-    return [
-        {"hide": [], "order": None, **q}
-        for q in queries
-        if _uses_present(q["query"], present)
-    ]
+    return [{"hide": [], "order": None, **q} for q in queries]
+
+
+def saved_view(raw: object) -> dict | None:
+    """A view as the page saved it, cut to what a view is; None when it is not one."""
+    if not isinstance(raw, dict):
+        return None
+    name, query = raw.get("name"), raw.get("query")
+    if not isinstance(name, str) or not name.strip() or not isinstance(query, str) or not query.strip():
+        return None
+    view = {key: raw[key] for key in SAVED_VIEW_FIELDS if raw.get(key) is not None}
+    view["hide"] = [str(h) for h in view.get("hide", []) if isinstance(h, str)]
+    return view
+
+
+def load_saved_views() -> list[dict]:
+    """The views people saved, in the order they were first saved."""
+    try:
+        raw = json.loads(SAVED_VIEWS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    views = [saved_view(v) for v in (raw if isinstance(raw, list) else [])]
+    return [v for v in views if v is not None]
+
+
+def change_saved_views(upsert: list[object], delete: list[object]) -> list[dict]:
+    """Add or replace the views in ``upsert`` (by name), drop those named in ``delete``; returns all."""
+    views = {v["name"]: v for v in load_saved_views()}
+    for name in delete:
+        if isinstance(name, str):
+            views.pop(name, None)
+    for raw in upsert:
+        view = saved_view(raw)
+        if view is not None:
+            views[view["name"]] = view
+    result = list(views.values())
+    SAVED_VIEWS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SAVED_VIEWS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(SAVED_VIEWS_PATH)
+    return result
 
 
 def _uses_present(query: str, present: set[str]) -> bool:

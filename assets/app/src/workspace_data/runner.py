@@ -51,6 +51,7 @@ STALE_AFTER_SECONDS = 10.0
 BACKGROUND_REFRESH_SECONDS = 120.0
 
 _refresh_lock = threading.Lock()
+_views_lock = threading.Lock()
 _last_refresh = {"at": 0.0}
 _stop = threading.Event()
 
@@ -151,6 +152,64 @@ _RETIRE_SCRIPT = """<script>(function(){
 })();</script>"""
 
 
+# Saved views belong to the workspace, not to one browser: the page's own storage is private to
+# the browser it runs in, so a view saved in one tab, browser or device would never reach another.
+# Every change the page makes to its saved views goes to ``saved-views``, which keeps them in
+# ``export.SAVED_VIEWS_PATH`` and rebuilds the export with them; every page load imports the
+# export, so every other copy picks them up (a changed export re-imports in full). A view that
+# was in the previous export and is gone from this one was deleted elsewhere, and goes here too.
+# Views kept only in this browser from before (not in the export, never shared) are sent up once.
+_SAVED_VIEWS_SCRIPT = """<script>(function(){
+  var db = new URLSearchParams(location.search).get('dbname') || '';
+  var namesKey = 'dactal_dv_views_' + db;
+  var baseline = null, importing = false;
+  function canon(q){ return JSON.stringify([q.name, q.tag || null, q.order == null ? null : q.order,
+    q.query, q.hide || [], !!q.relative]); }
+  function snapshot(queries){ var m = new Map();
+    (queries || []).forEach(function(q){ if (q && q.name) m.set(q.name, canon(q)); }); return m; }
+  function send(upsert, remove){
+    if (!upsert.length && !remove.length) return;
+    fetch('saved-views', {method: 'POST', keepalive: true, headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({upsert: upsert.map(function(q){ return {name: q.name, tag: q.tag,
+        order: q.order, query: q.query, hide: q.hide, relative: q.relative}; }), 'delete': remove})});
+  }
+  var set = dactaldb.set.bind(dactaldb);
+  dactaldb.set = function(key, value){
+    if (key === 'queries' && baseline && !importing) {
+      var now = snapshot(value), upsert = [], remove = [];
+      (value || []).forEach(function(q){ if (q && q.name && baseline.get(q.name) !== now.get(q.name)) upsert.push(q); });
+      baseline.forEach(function(_, name){ if (!now.has(name)) remove.push(name); });
+      baseline = now;
+      send(upsert, remove);
+    }
+    return set(key, value);
+  };
+  var importData = window.import_data;
+  window.import_data = async function(exported, overwrite){
+    var names = new Set(((exported && exported.queries) || []).map(function(q){ return q.name; }));
+    var before = null;
+    try { before = JSON.parse(localStorage.getItem(namesKey) || 'null'); } catch (e) {}
+    var previous = new Set(before || []);
+    var queries = dactal.data.queries || [];
+    if (before) {
+      var kept = queries.filter(function(q){ return !(q && previous.has(q.name) && !names.has(q.name)); });
+      queries.forEach(function(q){ if (q && previous.has(q.name) && !names.has(q.name)) dactal.savedquerynames.delete(q.name); });
+      if (kept.length !== queries.length) { dactal.data.queries = kept; }
+    }
+    // Built-in views carry the export's tags; one the export dropped is not someone's view.
+    var builtIn = /^(analyses|browse|diagnostic|(project|app|folder|skill): .*)$/;
+    var localOnly = (dactal.data.queries || []).filter(function(q){
+      return q && q.name && q.query && !builtIn.test(q.tag || '') && !names.has(q.name) && !previous.has(q.name); });
+    importing = true;
+    try { await importData(exported, overwrite); } finally { importing = false; }
+    if (dactal.data.queries) await set('queries', dactal.data.queries);
+    localStorage.setItem(namesKey, JSON.stringify(Array.from(names)));
+    baseline = snapshot(dactal.data.queries);
+    send(localOnly, []);
+  };
+})();</script>"""
+
+
 def served_dactal_html() -> str:
     page = (ASSETS / "dactal.html").read_text(encoding="utf-8")
     version = export.content_version(EXPORT_PATH)
@@ -164,7 +223,7 @@ def served_dactal_html() -> str:
         )
     return page.replace(
         "</body>",
-        _files_tree_script() + _RETIRE_SCRIPT + _WORKSPACE_GLUE + "</body>",
+        _files_tree_script() + _RETIRE_SCRIPT + _SAVED_VIEWS_SCRIPT + _WORKSPACE_GLUE + "</body>",
         1,
     )
 
@@ -326,6 +385,29 @@ def contents() -> Response:
     if text is None:
         return Response(status=204)
     return Response(text, mimetype="text/plain; charset=utf-8")
+
+
+@app.route("/saved-views", methods=["GET", "POST"])
+def saved_views() -> Response:
+    """The views saved on the query page, kept for every browser; POST adds, replaces or deletes some.
+
+    POST takes ``{"upsert": [view, ...], "delete": [name, ...]}`` and rebuilds the export so every
+    other page picks the change up on its next load.
+    """
+    if request.method == "POST":
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            abort(400)
+        upsert, delete = body.get("upsert", []), body.get("delete", [])
+        if not isinstance(upsert, list) or not isinstance(delete, list):
+            abort(400)
+        with _views_lock:
+            export.change_saved_views(upsert, delete)
+        refresh_export()
+    return Response(
+        json.dumps(export.load_saved_views(), ensure_ascii=False),
+        mimetype="application/json",
+    )
 
 
 @app.route("/health")

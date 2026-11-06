@@ -131,6 +131,16 @@ of built-in shortcuts; never move the user's own icons.
 - **Stable join keys, with no hyphens.** A column named after a dataset auto-joins it
   (`messages.chat` -> `chats`); a key used in a clickable link must not contain `-`, because the
   page reads `agent-0d72...` as an expression. Chats are keyed by their id without `agent-`.
+- **Saved views belong to the workspace, not to one browser.** The stock page keeps everything
+  in the browser's own storage, private to one browser at one address, so a view saved in one
+  tab, browser, device, or by another person using a shared workspace would never reach the
+  others. The served page sends every save, edit and delete of a view to `saved-views`
+  (`runner.py`, `_SAVED_VIEWS_SCRIPT`), which keeps them in `data/.apps/workspace-data/saved_views.json`
+  (`export.change_saved_views`) and rebuilds the export with them; every page load imports the
+  export, so every copy converges. A saved view replaces the built-in view of the same name;
+  deleting it brings the built-in back. A view kept only in one browser from before this existed is
+  sent up the next time that page loads. Only what a view is (name, tag, order, query, hide,
+  relative) is kept; its cached results stay in the browser.
 - **Every saved view carries `hide` and `order`** (empty/None when unused). The stock page
   crashes on a saved view without them -- it silently shows its index instead of the result.
 - **No apostrophes in saved-view names**: the page's save box shows them as `&squo;`.

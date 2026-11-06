@@ -160,6 +160,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         export, "MACHINE_FILES_CACHE", tmp_path / "cache" / "machine_files.json"
     )
+    monkeypatch.setattr(export, "SAVED_VIEWS_PATH", tmp_path / "views" / "saved_views.json")
     return tmp_path
 
 
@@ -444,3 +445,29 @@ def test_scheduled_jobs_list_every_routine_with_its_switch_and_last_success(
         and "path=%2Fdigest" in rows["digest"]["open"]
     )
     assert rows["backup"]["ts"] == 1790841600
+
+
+def test_saved_views_are_in_the_export_for_every_browser(workspace: Path) -> None:
+    export.change_saved_views(
+        [
+            {"name": "figures by move points", "query": "files#name", "results": [1, 2], "time": 3},
+            {"name": "your conversations", "query": "chats#title", "tag": "analyses", "order": 3},
+            {"name": "", "query": "files"},
+            "not a view",
+        ],
+        [],
+    )
+    queries = {q["name"]: q for q in export.build_export()["queries"]}
+    mine = queries["figures by move points"]
+    # What the browser kept on the side (its cached results) stays in that browser.
+    assert mine == {"name": "figures by move points", "query": "files#name", "hide": [], "order": None}
+    # A saved view replaces the built-in view of the same name.
+    assert queries["your conversations"]["query"] == "chats#title"
+    assert [q["name"] for q in export.build_export()["queries"]].count("your conversations") == 1
+    assert "" not in queries
+
+    export.change_saved_views([], ["figures by move points", "your conversations"])
+    queries = {q["name"]: q for q in export.build_export()["queries"]}
+    assert "figures by move points" not in queries
+    # Deleting the saved copy brings the built-in view back.
+    assert queries["your conversations"]["query"] != "chats#title"
