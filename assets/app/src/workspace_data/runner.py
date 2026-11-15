@@ -24,6 +24,8 @@ Persistent state lives under ``DATA_DIR`` (``WORKSPACE_DATA_DATA_DIR`` overrides
 import html
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -46,31 +48,61 @@ WORKSPACE_URL = os.environ.get("WORKSPACE_DATA_SHELL_URL", "http://127.0.0.1:800
 ASSETS = Path(__file__).parent / "assets"
 EXPORT_PATH = DATA_DIR / "data" / f"{export.DBNAME}.json"
 # A page load rebuilds the export when it is older than this; the background loop keeps it
-# current while nobody is looking.
+# current while someone is using the page, and stops once nobody has for IDLE_AFTER_SECONDS.
 STALE_AFTER_SECONDS = 10.0
 BACKGROUND_REFRESH_SECONDS = 120.0
+IDLE_AFTER_SECONDS = 900.0
+# A page load uses the machine's folder tree however old its cache is (walking the machine takes
+# seconds); the background loop re-walks it when it is older than the usual ten minutes.
+ANY_AGE = float("inf")
 
 _refresh_lock = threading.Lock()
 _views_lock = threading.Lock()
 _last_refresh = {"at": 0.0}
+_last_used = {"at": time.monotonic()}
 _stop = threading.Event()
 
 
-def refresh_export(max_age: float = 0.0) -> None:
-    """Rebuild the export unless one was built within ``max_age`` seconds. Single-flight."""
+def refresh_export(
+    max_age: float = 0.0, machine_max_age: float = machine_files.MAX_AGE_SECONDS
+) -> None:
+    """Rebuild the export unless one was built within ``max_age`` seconds. Single-flight.
+
+    The rebuild runs in a short-lived child process, so the memory it needs is handed back to
+    the machine when it finishes instead of staying with this long-running server.
+    """
     with _refresh_lock:
         if time.monotonic() - _last_refresh["at"] < max_age and EXPORT_PATH.exists():
             return
-        export.write_export(EXPORT_PATH)
+        result = subprocess.run(
+            [sys.executable, "-m", "workspace_data.export", str(EXPORT_PATH), str(machine_max_age)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise OSError(f"export rebuild failed ({result.returncode}): {result.stderr[-2000:]}")
         _last_refresh["at"] = time.monotonic()
+
+
+def _page_used() -> None:
+    _last_used["at"] = time.monotonic()
+
+
+def _background_tick() -> bool:
+    """One pass of the background loop: rebuild unless the page has gone unused. Returns whether it did."""
+    if time.monotonic() - _last_used["at"] > IDLE_AFTER_SECONDS:
+        return False
+    try:
+        refresh_export()
+    except OSError as error:
+        app.logger.warning("background refresh failed: %s", error)
+    return True
 
 
 def _background_refresh() -> None:
     while not _stop.wait(BACKGROUND_REFRESH_SECONDS):
-        try:
-            refresh_export()
-        except OSError as error:
-            app.logger.warning("background refresh failed: %s", error)
+        _background_tick()
 
 
 # ---- the served DACTAL front-end -------------------------------------------------
@@ -313,7 +345,8 @@ app = Flask("workspace_data", static_folder=None)
 
 @app.route("/")
 def index() -> WerkzeugResponse:
-    refresh_export(STALE_AFTER_SECONDS)
+    _page_used()
+    refresh_export(STALE_AFTER_SECONDS, ANY_AGE)
     return redirect(
         f"dactal.html?dbname={export.DBNAME}&query={quote(export.FIRST_TOUR_QUERY)}"
     )
@@ -321,7 +354,8 @@ def index() -> WerkzeugResponse:
 
 @app.route("/dactal.html")
 def dactal_html() -> Response:
-    refresh_export(STALE_AFTER_SECONDS)
+    _page_used()
+    refresh_export(STALE_AFTER_SECONDS, ANY_AGE)
     response = Response(served_dactal_html(), mimetype="text/html")
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -329,8 +363,9 @@ def dactal_html() -> Response:
 
 @app.route("/data/<path:filename>")
 def data(filename: str) -> WerkzeugResponse:
+    _page_used()
     if not EXPORT_PATH.exists():
-        refresh_export()
+        refresh_export(machine_max_age=ANY_AGE)
     if not (EXPORT_PATH.parent / filename).is_file():
         # The stock page's gallery shows dactal.org's own pictures by relative path.
         return redirect(f"{DACTAL_ORIGIN}/data/{quote(filename)}")
@@ -403,7 +438,7 @@ def saved_views() -> Response:
             abort(400)
         with _views_lock:
             export.change_saved_views(upsert, delete)
-        refresh_export()
+        refresh_export(machine_max_age=ANY_AGE)
     return Response(
         json.dumps(export.load_saved_views(), ensure_ascii=False),
         mimetype="application/json",
@@ -416,7 +451,7 @@ def health() -> Response:
 
 
 def main() -> None:
-    refresh_export()
+    refresh_export(machine_max_age=ANY_AGE)
     threading.Thread(
         target=_background_refresh, name="export-refresh", daemon=True
     ).start()

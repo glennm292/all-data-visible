@@ -15,7 +15,13 @@ Change it there, not here: re-running the skill's installer replaces this folder
   changed.
 - `runner.py` serves the stock query page (`assets/dactal.html`, pulled with the skill's
   `run.py fetch-frontend`) on that export, rebuilding it on page load when stale and every
-  two minutes in the background.
+  two minutes in the background while the page is in use (the loop rests after 15 minutes
+  without a page load). Each rebuild runs as its own short-lived program
+  (`python -m workspace_data.export`), so the memory a rebuild needs -- a few hundred MB on a
+  large machine -- is freed when it ends instead of staying with the server; the program also
+  offers itself as the first thing stopped when memory runs short. A page load reuses the
+  machine's cached folder tree however old it is; the background loop re-walks it every ten
+  minutes.
 
 Check every saved query against the real engine with
 `python3 .agents/skills/all-data-visible/scripts/install.py verify`.

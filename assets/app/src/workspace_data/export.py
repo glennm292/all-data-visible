@@ -12,6 +12,7 @@ The ``analyses`` ones form the narrated tour, chained in ``order``.
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
 from workspace_data import collect, machine_files
@@ -327,7 +328,7 @@ def ordered(data: dict[str, list], packaged: set[str]) -> dict[str, list | dict]
     return out
 
 
-def build_export() -> dict:
+def build_export(machine_max_age: float = machine_files.MAX_AGE_SECONDS) -> dict:
     chats, messages = collect.collect_chats_and_messages()
     agent_to_chat = collect.agent_chat_map()
     known_chats = {c["id"] for c in chats}
@@ -340,7 +341,7 @@ def build_export() -> dict:
         "messages": messages,
         "steps": steps,
         "tasks": tasks,
-        "file system": [machine_files.cached_tree(MACHINE_FILES_CACHE)],
+        "file system": [machine_files.cached_tree(MACHINE_FILES_CACHE, machine_max_age)],
         "files": collect.collect_files(),
         "memories": collect.collect_memories(),
         "apps": collect.collect_apps(),
@@ -403,11 +404,14 @@ def build_export() -> dict:
     }
 
 
-def write_export(path: Path) -> bool:
-    """Rebuild the export and write it to ``path`` only when its content changed. Returns whether it did."""
+def write_export(path: Path, machine_max_age: float = machine_files.MAX_AGE_SECONDS) -> bool:
+    """Rebuild the export and write it to ``path`` only when its content changed. Returns whether it did.
+
+    The machine's folder tree is re-walked when its cache is older than ``machine_max_age``.
+    """
     # Not sort_keys: ``build_export`` already puts every object's properties in their logical order
     # (``logical``), and sorting here would alphabetize them.
-    body = json.dumps(build_export(), ensure_ascii=False, separators=(",", ":"))
+    body = json.dumps(build_export(machine_max_age), ensure_ascii=False, separators=(",", ":"))
     try:
         if path.read_text(encoding="utf-8") == body:
             return False
@@ -425,3 +429,23 @@ def content_version(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
     except OSError:
         return "none"
+
+
+def main() -> None:
+    """``python -m workspace_data.export <path> [<machine max age>]``: one rebuild, then exit.
+
+    The runner rebuilds in this separate, short-lived process because a rebuild briefly holds the
+    whole export (and the machine's folder tree) in memory, and a long-running Python process
+    keeps memory it once used. Run as a program, it volunteers to be the first one stopped when
+    the machine runs short of memory: the next rebuild simply tries again.
+    """
+    max_age = float(sys.argv[2]) if len(sys.argv) > 2 else machine_files.MAX_AGE_SECONDS
+    write_export(Path(sys.argv[1]), max_age)
+
+
+if __name__ == "__main__":
+    try:
+        Path("/proc/self/oom_score_adj").write_text("1000")
+    except OSError:
+        pass
+    main()

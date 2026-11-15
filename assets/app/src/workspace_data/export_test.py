@@ -471,3 +471,12 @@ def test_saved_views_are_in_the_export_for_every_browser(workspace: Path) -> Non
     assert "figures by move points" not in queries
     # Deleting the saved copy brings the built-in view back.
     assert queries["your conversations"]["query"] != "chats#title"
+
+
+def test_the_rebuild_program_writes_the_export(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "out" / "workspace.json"
+    monkeypatch.setattr("sys.argv", ["export", str(target), "inf"])
+    export.main()
+    assert "file system" in json.loads(target.read_text(encoding="utf-8"))["data"]
