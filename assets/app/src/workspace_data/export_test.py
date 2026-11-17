@@ -133,6 +133,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _write(apps / "demo_game" / "src" / "demo_game" / "__init__.py", "")
     _write(apps / "demo_game" / "src" / "demo_game" / "datasets.py", PROVIDER)
     _write(apps / "demo_game" / "package.json", '{"name": "not data"}')
+    _write(apps / "demo_game" / "testdata" / "sample_answer.json", '[{"id": "fixture"}]')
     _write(
         apps / "browser" / "app.toml",
         'name = "browser"\ndisplay_name = "Browser"\npriority = "browser"\n',
@@ -204,6 +205,8 @@ def test_every_kind_of_project_data_becomes_a_dataset(workspace: Path) -> None:
     assert groups["demo_items"] == "project: demo-game"
     assert groups["my_project_budget"] == "folder: my-project"
     assert not any("browser" in name or "package" in name for name in data)
+    # Test material an app ships is not its data.
+    assert '"fixture"' not in json.dumps(data) and not any("sample_answer" in name for name in data)
 
 
 def test_a_project_brings_its_own_saved_views(workspace: Path) -> None:

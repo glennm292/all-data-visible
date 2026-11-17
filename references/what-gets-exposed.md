@@ -24,7 +24,7 @@ the tour -- with its row count, a one-line description, and an `open »` link.
 | Group | Dataset name | Read from |
 |---|---|---|
 | `project: <app>` | as the project names them (one packaged item, e.g. `pokemon`) | a user-built app's `<package>/datasets.py` (see `project-datasets.md`) |
-| `project: <app>` | `<app>` packaged, or `<app>_<path>` for a lone file | JSON / JSON-lines / CSV / TSV files shipped in a user-built app's folder (build configuration such as `package.json` excluded) |
+| `project: <app>` | `<app>` packaged, or `<app>_<path>` for a lone file | JSON / JSON-lines / CSV / TSV files shipped in a user-built app's folder (build configuration such as `package.json`, and test material in `testdata/`, `tests/` or `fixtures/` folders, excluded) |
 | `app: <app>` | `<app>` packaged, or `<app>_<file>` for a lone file | every JSON / JSON-lines file an app keeps under `data/.apps/<app>/` (the chat, browser and terminal stores are machinery and skipped; so is an app whose project's `datasets.py` says `includes_app_records`) |
 | `skill: <skill>` | `skill_<skill>` packaged, or `skill_<skill>_<file>` for a lone file | every JSON / JSON-lines file a skill keeps under `data/.skills/<skill>/` |
 | `folder: <folder>` | `<family>` packaged, or `<folder>_<path>` for a file with no family | every CSV / TSV / JSON / JSON-lines file in the user's visible folders of `data/` |

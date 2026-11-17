@@ -50,6 +50,8 @@ PROVIDER_TIMEOUT_SECONDS = 60
 TABLE_SUFFIXES = (".json", ".jsonl", ".csv", ".tsv")
 TABLE_MAX_ROWS = 5000
 TABLE_MAX_BYTES = 20_000_000
+# Folders in a project that hold build output or test material, not the project's data.
+PROJECT_DIRS_SKIPPED = frozenset({"node_modules", "dist", "__pycache__", "testdata", "tests", "fixtures"})
 BUILD_CONFIG_FILES = frozenset(
     {
         "package.json",
@@ -1103,7 +1105,7 @@ def collect_project_datasets() -> tuple[list[dict], frozenset[str]]:
             ):
                 continue
             if any(
-                part.startswith(".") or part in ("node_modules", "dist", "__pycache__")
+                part.startswith(".") or part in PROJECT_DIRS_SKIPPED
                 for part in rel.parts
             ):
                 continue

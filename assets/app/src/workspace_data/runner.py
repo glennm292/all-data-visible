@@ -63,6 +63,11 @@ _last_used = {"at": time.monotonic()}
 _stop = threading.Event()
 
 
+
+class ExportRebuildError(OSError):
+    """The child process that rebuilds the export failed."""
+
+
 def refresh_export(
     max_age: float = 0.0, machine_max_age: float = machine_files.MAX_AGE_SECONDS
 ) -> None:
@@ -81,7 +86,7 @@ def refresh_export(
             check=False,
         )
         if result.returncode != 0:
-            raise OSError(f"export rebuild failed ({result.returncode}): {result.stderr[-2000:]}")
+            raise ExportRebuildError(f"export rebuild failed ({result.returncode}): {result.stderr[-2000:]}")
         _last_refresh["at"] = time.monotonic()
 
 
