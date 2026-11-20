@@ -431,21 +431,26 @@ def content_version(path: Path) -> str:
         return "none"
 
 
-def main() -> None:
-    """``python -m workspace_data.export <path> [<machine max age>]``: one rebuild, then exit.
+def rebuild_in_own_process(path: Path, machine_max_age: float) -> None:
+    """One rebuild, as the body of the short-lived process the runner starts for it.
 
-    The runner rebuilds in this separate, short-lived process because a rebuild briefly holds the
+    The runner rebuilds in a separate, short-lived process because a rebuild briefly holds the
     whole export (and the machine's folder tree) in memory, and a long-running Python process
-    keeps memory it once used. Run as a program, it volunteers to be the first one stopped when
-    the machine runs short of memory: the next rebuild simply tries again.
+    keeps memory it once used. That process volunteers to be the first one stopped when the
+    machine runs short of memory: the next rebuild simply tries again.
     """
-    max_age = float(sys.argv[2]) if len(sys.argv) > 2 else machine_files.MAX_AGE_SECONDS
-    write_export(Path(sys.argv[1]), max_age)
-
-
-if __name__ == "__main__":
     try:
         Path("/proc/self/oom_score_adj").write_text("1000")
     except OSError:
         pass
+    write_export(path, machine_max_age)
+
+
+def main() -> None:
+    """``python -m workspace_data.export <path> [<machine max age>]``: one rebuild by hand, then exit."""
+    max_age = float(sys.argv[2]) if len(sys.argv) > 2 else machine_files.MAX_AGE_SECONDS
+    rebuild_in_own_process(Path(sys.argv[1]), max_age)
+
+
+if __name__ == "__main__":
     main()

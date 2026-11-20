@@ -21,7 +21,7 @@ path = ".agents/skills/all-data-visible"
 note = "installs and updates the app; export format, saved-view conventions, query verification"
 
 # How update-app boots a throwaway preview of this app: on a free port, over a
-# scratch copy of its data (see .agents/skills/update-app/scripts/preview_app.py).
+# scratch copy of its data (see .agents/skills/update-app/python/update_app_skill/preview_app.py).
 [preview]
 env = {WORKSPACE_DATA_PORT = "{port:main}", WORKSPACE_DATA_HOST = "{host}", WORKSPACE_DATA_DATA_DIR = "{copy:data}"}
 copies = {data = "data/.apps/workspace-data"}

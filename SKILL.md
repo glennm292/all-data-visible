@@ -47,8 +47,9 @@ python3 .agents/skills/all-data-visible/scripts/install.py install
 It copies `assets/app/` to `system/apps/workspace_data/` (app name `workspace-data`, shown as
 "Data", launcher rank 25: between File Viewer and Browser), pulls the current stock query page
 from dactal.org (`--offline` keeps the bundled one), writes
-`system/supervisord.conf.d/workspace-data.conf`, installs the package (`uv tool install -e`
-plus `uv sync --all-packages`), starts it, and waits for `/health`. Re-running it updates the
+`system/supervisord.conf.d/workspace-data.conf`, installs the package as a standalone project
+(its own `uv.lock` and `.venv`, synced with `uv sync --locked --project
+system/apps/workspace_data`), starts it, and waits for `/health`. Re-running it updates the
 code in place and keeps the port; the user's data and explorations are untouched.
 
 If the workspace follows the `build-app` / `update-app` conventions, this is the equivalent of
@@ -65,11 +66,20 @@ the same picture). Load the
 `update-app` skill before touching another app's code. Data already in files (stored records,
 CSV/JSON in the user's folders, data files an app ships) needs nothing: it is picked up as-is.
 
+While you are in an app, notice whether its rows are really a *picture* of something -- a board
+position, a route, a line of writing and the comment beside it -- rather than a table. Where they
+are, **offer** to ship the app's own way of drawing them as a renderer the query page can use
+(`references/project-datasets.md`, "Drawing a project's own rows"), so a query over those rows can
+be read the way the app reads them. Encouraged, never required: an app that draws nothing special,
+or whose owner would rather not, is finished at `datasets.py`. What makes it cheap is that the
+drawing is written once and serves both -- the app's own views and the query page -- so say that,
+and say it is a change to the app's code, before the user decides.
+
 ### 3. Verify `[script]`
 
 ```
 python3 .agents/skills/all-data-visible/scripts/install.py verify
-PYTHONPATH=system/apps/workspace_data/src uv run pytest system/apps/workspace_data -q
+(cd system/apps/workspace_data && uv run --no-sync pytest -q)
 ```
 
 `verify` must report no `error` and no `literal`; the only `empty` views allowed are the
@@ -145,7 +155,10 @@ of built-in shortcuts; never move the user's own icons.
   crashes on a saved view without them -- it silently shows its index instead of the result.
 - **No apostrophes in saved-view names**: the page's save box shows them as `&squo;`.
 - **Connectors load through the export's `connectors` dataset only.** Preloading a renderer
-  script in the page runs it before the engine exists.
+  script in the page runs it before the engine exists. The one exception is a user-built app's
+  own `dactal_render.js`, which the app loads as a *module* -- deferred, so it registers after
+  the engine is built and before the first query runs (`references/project-datasets.md`,
+  "Drawing a project's own rows").
 - **Links that open workspace windows** are raw anchors to the app's `/open` route (204, so
   the page never navigates), clicked through the injected glue that passes the shell's client.
 

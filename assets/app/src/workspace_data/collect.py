@@ -43,8 +43,9 @@ FILE_ROOTS_HIDDEN_OK = ("memories",)
 APP_DATA_SKIPPED = frozenset({"chat", "browser", "terminal", "workspace-data"})
 APPS_DIR = Path("system/apps")
 SELF_APP = "workspace-data"
-# The interpreter a project's dataset module runs under: the root venv, which every app under
-# system/apps/ is installed into.
+# The interpreter a project's dataset module runs under when the project has no venv of its own:
+# the root venv. A user app is a standalone project with its own .venv, which holds the
+# libraries its module imports (another user app included), so that one is used when present.
 PROJECT_PYTHON = os.environ.get("WORKSPACE_DATA_PROJECT_PYTHON", ".venv/bin/python")
 PROVIDER_TIMEOUT_SECONDS = 60
 TABLE_SUFFIXES = (".json", ".jsonl", ".csv", ".tsv")
@@ -970,6 +971,43 @@ def _user_projects() -> Iterator[tuple[str, Path]]:
             yield name, manifest_path.parent
 
 
+RENDERER_FILE = "dactal_render.js"
+
+
+def project_asset_dirs() -> dict[str, Path]:
+    """app name -> the assets directory of the one package of each app the user had built.
+
+    An app with no ``src/<package>/assets`` directory, or with several packages carrying one, is
+    left out: there would be no single answer to what ``<app>/<file>`` means.
+    """
+    found: dict[str, Path] = {}
+    for app, app_dir in _user_projects():
+        assets = [
+            package_dir / "assets"
+            for package_dir in (
+                sorted((app_dir / "src").glob("*/")) if (app_dir / "src").is_dir() else []
+            )
+            if (package_dir / "assets").is_dir()
+        ]
+        if len(assets) == 1:
+            found[app] = assets[0]
+    return found
+
+
+def collect_project_renderers() -> list[tuple[str, Path]]:
+    """(app name, its renderer file) for every user-built app that ships a DACTAL renderer.
+
+    A project draws its own rows on the query page by putting a ``dactal_render.js`` in its
+    package's ``assets`` directory. It is loaded as a module from this app's own origin, so a
+    relative import in it (``./row_format.js``) reaches its sibling in the same directory.
+    """
+    return [
+        (app, assets / RENDERER_FILE)
+        for app, assets in sorted(project_asset_dirs().items())
+        if (assets / RENDERER_FILE).is_file()
+    ]
+
+
 def _tree_mtime(root: Path) -> float:
     return max((p.stat().st_mtime for p in root.rglob("*.py")), default=0.0)
 
@@ -990,21 +1028,28 @@ def _run_provider(app: str, package: str, package_dir: Path) -> tuple[list[dict]
         return cached[1], cached[2]
     source = str(package_dir / "datasets.py")
     try:
-        python = PROJECT_PYTHON if Path(PROJECT_PYTHON).exists() else sys.executable
-        # The project's own source goes first on the path, so its module runs even where the
-        # project is not installed into that interpreter.
-        env = {
-            **os.environ,
-            "PYTHONPATH": os.pathsep.join(
-                filter(
-                    None,
-                    [
-                        str(package_dir.parent.resolve()),
-                        os.environ.get("PYTHONPATH", ""),
-                    ],
-                )
-            ),
-        }
+        own_python = package_dir.parent.parent / ".venv" / "bin" / "python"
+        if own_python.exists():
+            # The project's own venv installs it and everything it imports.
+            python, env = str(own_python), dict(os.environ)
+        else:
+            python = PROJECT_PYTHON if Path(PROJECT_PYTHON).exists() else sys.executable
+            # A project with no venv of its own: its source goes first on the path, so its
+            # module runs even though that interpreter does not install it.
+            # import-path: other-tree -- the project is found by scanning system/apps at run time and has no venv that installs it
+            env = {
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    filter(
+                        None,
+                        [
+                            str(package_dir.parent.resolve()),
+                            os.environ.get("PYTHONPATH", ""),
+                        ],
+                    )
+                ),
+            }
+        # A process of its own: the module belongs to another project and runs in that project's venv.
         proc = subprocess.run(
             [python, "-m", f"{package}.datasets"],
             env=env,

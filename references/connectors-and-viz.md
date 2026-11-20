@@ -86,3 +86,6 @@ scope** for this skill — the skill covers loading existing connectors and
 inlining a bulk snapshot, which is the common path. If you genuinely need a new
 connector, see the connector authoring docs on dactal.org (`add_renderer` /
 `dactal.connect`) rather than this skill.
+
+One exception: a renderer for a *project's own* rows is in scope and is small -- see
+"Drawing a project's own rows" in `project-datasets.md`.

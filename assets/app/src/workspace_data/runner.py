@@ -9,8 +9,10 @@ workspace's export. What it serves:
 - ``/dactal.html`` is the stock front-end (pulled by the skill's ``fetch-frontend``), with
   injected: the content-hash-gated reload bootstrap (the browser keeps its own explorable copy
   and re-imports only when the data actually changed -- never on every load), cache-busted
-  front-end script URLs, the workspace location beacon, and the handler
-  that turns the data's "open ... »" links into workspace windows.
+  front-end script URLs, the workspace location beacon, the handler
+  that turns the data's "open ... »" links into workspace windows, and each user-built app's own
+  ``dactal_render.js`` (served from ``/app-assets/<app>/``), which offers a display that draws
+  that project's rows as the thing they are rather than as a table.
 - ``/data/workspace.json`` is the one export (the single source of truth), rebuilt from the
   workspace's records by ``export``.
 - ``/open`` asks the workspace to open a window (a chat, a file) and answers 204, so the query
@@ -23,13 +25,15 @@ Persistent state lives under ``DATA_DIR`` (``WORKSPACE_DATA_DATA_DIR`` overrides
 
 import html
 import json
+import multiprocessing
 import os
-import subprocess
-import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from urllib.parse import quote
 
@@ -79,15 +83,28 @@ def refresh_export(
     with _refresh_lock:
         if time.monotonic() - _last_refresh["at"] < max_age and EXPORT_PATH.exists():
             return
-        result = subprocess.run(
-            [sys.executable, "-m", "workspace_data.export", str(EXPORT_PATH), str(machine_max_age)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise ExportRebuildError(f"export rebuild failed ({result.returncode}): {result.stderr[-2000:]}")
+        _rebuild(EXPORT_PATH, machine_max_age)
         _last_refresh["at"] = time.monotonic()
+
+
+def _rebuild(
+    path: Path,
+    machine_max_age: float,
+    job: Callable[[Path, float], None] = export.rebuild_in_own_process,
+) -> None:
+    """Run ``job`` (the export's rebuild) in a fresh interpreter and wait for it.
+
+    Spawned, not forked: this server runs threads, and a forked child could inherit a lock one of
+    them holds.
+    """
+    context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=1, mp_context=context) as pool:
+        error = pool.submit(job, path, machine_max_age).exception()
+    if isinstance(error, BrokenProcessPool):
+        # Most often the out-of-memory killer stopping the rebuild, which volunteers for it.
+        raise ExportRebuildError(f"export rebuild failed: its process was killed ({error})") from error
+    if error is not None:
+        raise ExportRebuildError(f"export rebuild failed: {error!r}") from error
 
 
 def _page_used() -> None:
@@ -260,8 +277,27 @@ def served_dactal_html() -> str:
         )
     return page.replace(
         "</body>",
-        _files_tree_script() + _RETIRE_SCRIPT + _SAVED_VIEWS_SCRIPT + _WORKSPACE_GLUE + "</body>",
+        _files_tree_script()
+        + _RETIRE_SCRIPT
+        + _SAVED_VIEWS_SCRIPT
+        + _WORKSPACE_GLUE
+        + _project_renderer_scripts()
+        + "</body>",
         1,
+    )
+
+
+def _project_renderer_scripts() -> str:
+    """Load each user-built app's own renderer, so its rows can be drawn as the thing they are.
+
+    A module, not a plain script: it is served from this app's origin (``/app-assets/...``), so a
+    relative import in it reaches the sibling files of its own project's assets. Modules are
+    deferred, which puts them after the page has built ``dactal`` and before its ``onload`` runs
+    the first query -- exactly where a renderer has to register.
+    """
+    return "".join(
+        f'<script type="module" src="app-assets/{quote(app)}/{quote(collect.RENDERER_FILE)}"></script>'
+        for app, _ in collect.collect_project_renderers()
     )
 
 
@@ -382,6 +418,22 @@ def data(filename: str) -> WerkzeugResponse:
 @app.route("/queries/<path:filename>")
 def gallery_picture(filename: str) -> WerkzeugResponse:
     return redirect(f"{DACTAL_ORIGIN}/queries/{quote(filename)}")
+
+
+@app.route("/app-assets/<app_name>/<path:filename>")
+def project_asset(app_name: str, filename: str) -> WerkzeugResponse:
+    """A file from a user-built app's own assets, served from this app's origin.
+
+    This is what lets a project's ``dactal_render.js`` import its siblings: the whole directory
+    is reachable under one path here, so the relative URLs inside it resolve. Only the apps the
+    user built are served, and only their assets directory.
+    """
+    assets = collect.project_asset_dirs().get(app_name)
+    if assets is None:
+        abort(404)
+    response = send_from_directory(assets.resolve(), filename, max_age=0)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/catalog.json")

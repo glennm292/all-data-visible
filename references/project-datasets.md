@@ -8,8 +8,9 @@ exposed too.
 
 Add `datasets.py` to the package of a user-built app
 (`system/apps/<app>/src/<package>/datasets.py`). The Data app runs it as
-`python -m <package>.datasets` (under the workspace's root venv, from the workspace root, with
-the package's own `src/` first on the path), caches the result until the package's Python files
+`python -m <package>.datasets` (under the project's own venv, `system/apps/<app>/.venv`, which
+installs the project and everything it imports; a project with no venv of its own runs under the
+workspace's root venv with its `src/` first on the path), from the workspace root, caches the result until the package's Python files
 or the app's stored records under `data/.apps/<app>/` change, and reads this JSON from its
 stdout:
 
@@ -118,7 +119,63 @@ if __name__ == "__main__":
     main()
 ```
 
-Check it from the workspace root: `PYTHONPATH=system/apps/<app>/src python -m <package>.datasets
-| python3 -m json.tool | head`, then `install.py verify` -- the project's item and views appear
-under `project: <app>`. `system/apps/pokemon_duel/src/pokemon_duel/datasets.py` is the worked
-example in this workspace.
+Check it from the workspace root with the interpreter the Data app uses:
+`system/apps/<app>/.venv/bin/python -m <package>.datasets | python3 -m json.tool | head` (for a
+project with no venv of its own, `PYTHONPATH=system/apps/<app>/src python -m <package>.datasets`),
+then `install.py verify` -- the project's item and views appear under `project: <app>`. Any
+`datasets.py` already in `system/apps/*/src/*/` is a worked example to read before writing a new one.
+
+## Drawing a project's own rows
+
+Data goes in as rows and comes back out as a table. That is right for most data and wrong for
+the records that are a *picture* of something -- a board position, a route, a line of writing
+and the comment beside it. A project can hand the query page a renderer of its own, so the
+result of any query over those rows carries an extra display beside "raw data", drawn the way
+the project draws them.
+
+**Where the drawing code should live, when a project does this.** Not required -- a project is
+free to keep its page code where it is and ship no renderer at all. But a project that *is*
+going to have both its own view and a query-page display is better off with the drawing written
+once, in a plain module its pages and its renderer both load:
+
+```
+src/<package>/assets/
+    rows.js              <- the formatter: a row in, markup out. No fetching, no page state.
+    dactal_render.js     <- the renderer: imports rows.js, registers the display.
+    index.html           <- the project's own view: loads rows.js (on a route the app serves
+                            it from) and calls it, instead of drawing the row itself.
+```
+
+The pull the other way -- drawing inline in the page, then writing it out again in the renderer
+-- is what the split exists to resist. Two copies of the same drawing drift, and the drift is
+quiet: one of them starts leaving out a case and nothing fails. A project with two of its own
+views already has this problem without any renderer at all, so the split pays for itself before
+the query page is involved.
+
+Keep the formatter free of the page it is on: it takes a row and returns markup (or an element),
+reads nothing global, fetches nothing. That is what lets every caller share it. Ship the styles
+with it, as a string the caller can add to `document.head`, scoped to your own class -- the query
+page knows nothing about them, and a project's own page may already style the same names.
+
+**How the renderer is loaded.** Put a `dactal_render.js` in the project's package assets
+directory (`system/apps/<app>/src/<package>/assets/dactal_render.js`). The Data app serves that
+whole directory at `/app-assets/<app>/` and loads the file as a module, after the page has built
+`dactal` and before it runs its first query. Being a module is what lets it import its siblings
+out of the same directory, which is how it reaches the formatter rather than copying it:
+
+```js
+import "./rows.js";                // sets window.MyFormat, the same one the project's pages load
+
+add_renderer(["myapp"], {
+    // Every one of these fields must be on the first row of a result for the display to be
+    // offered. Pick fields the project always writes, and that nothing else here has.
+    offerfor: ["row_id", "text", "status"],
+    list: (row) => window.MyFormat.element(row),
+});
+```
+
+The display appears as "myapp list" beside "raw data" in the query result's header, and picking
+it re-runs the query with `|list=~myapp` on the end, which is a plain query the user can read
+and keep. `list` is handed one row and returns one element; a value read out of a query may
+arrive wrapped in a list of one, so unwrap before reading it. Guard the registration (`typeof
+add_renderer === "function"`) so a page that failed to reach the engine does not throw.

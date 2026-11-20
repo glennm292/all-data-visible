@@ -6,6 +6,7 @@ at it, so what is asserted is what a real install would expose.
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,26 @@ def test_every_kind_of_project_data_becomes_a_dataset(workspace: Path) -> None:
     assert not any("browser" in name or "package" in name for name in data)
     # Test material an app ships is not its data.
     assert '"fixture"' not in json.dumps(data) and not any("sample_answer" in name for name in data)
+
+
+def test_a_project_with_its_own_venv_runs_its_datasets_there(workspace: Path) -> None:
+    """A standalone app's dependencies live only in its own venv, so its datasets module runs
+    under that interpreter, which installs the project -- no source path is injected."""
+    src = workspace / "system" / "apps" / "demo_game" / "src"
+    called = workspace / "own_python_called"
+    own_python = workspace / "system" / "apps" / "demo_game" / ".venv" / "bin" / "python"
+    # Stands in for the project's venv interpreter: records the PYTHONPATH it was handed,
+    # then runs like an interpreter that has the project installed.
+    _write(
+        own_python,
+        f'#!/bin/sh\nprintf "%s" "$PYTHONPATH" > "{called}"\n'
+        f'PYTHONPATH="{src}" exec "{sys.executable}" "$@"\n',
+    )
+    own_python.chmod(0o755)
+    data = export.build_export()["data"]
+    assert [r["id"] for r in data["demo_items"]] == ["alpha", "beta"]
+    assert called.exists()
+    assert str(src) not in called.read_text()
 
 
 def test_a_project_brings_its_own_saved_views(workspace: Path) -> None:

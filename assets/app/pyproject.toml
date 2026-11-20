@@ -3,7 +3,7 @@ name = "workspace-data"
 version = "0.1.0"
 description = "Query page over every user-relevant dataset in this workspace, built on DACTAL"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0",
     "flask-sock>=0.7",
@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "imbue-common[testing]",
     # Used by test_no_type_errors in the ratchets, pinned to the version the shell and chat use.
     "ty==0.0.85",
 ]
@@ -29,3 +30,14 @@ packages = ["src/workspace_data"]
 
 # Makes this directory ty's project; without a [tool.ty] table ty keeps searching upward.
 [tool.ty]
+
+[tool.uv]
+# Supply-chain cooldown, the workspace root's window: a registry release is adopted
+# once it has been public this long, so a compromised one can be yanked first.
+exclude-newer = "14 days"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+
+[tool.uv.sources]
+imbue-common = { git = "https://github.com/imbue-ai/mngr", rev = "1a3f05d2077631ad0b43e1be3cec50fc5dc37749", subdirectory = "libs/imbue_common" }

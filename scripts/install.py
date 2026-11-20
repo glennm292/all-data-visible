@@ -40,7 +40,7 @@ FIRST_PORT = 8080
 RESERVED_PORTS = {8000, 8010, 8030, 8081}
 
 PROGRAM_CONF = """[program:{name}]
-command=python3 system/services/oom_priority/bin/oom_tag_service.py user bash -c "python3 system/scripts/forward_port.py --manifest system/apps/{package}/app.toml --url http://localhost:{port} && {name}"
+command=python3 system/services/oom_priority/bin/oom_tag_service.py user bash -c "python3 system/scripts/workspace_bare_scripts/venv_links.py ensure-project system/apps/{package} && uv sync --locked --project system/apps/{package} && python3 system/scripts/forward_port.py --manifest system/apps/{package}/app.toml --url http://localhost:{port} && exec system/apps/{package}/.venv/bin/{name}"
 directory={workspace}
 autostart=true
 autorestart=true
@@ -78,6 +78,8 @@ def check_workspace(workspace: Path) -> None:
         "system/apps",
         "system/supervisord.conf.d",
         "system/scripts/forward_port.py",
+        # install_package and the program block both run it to give the app its venv.
+        "system/scripts/workspace_bare_scripts/venv_links.py",
     ):
         if not (workspace / required).exists():
             raise InstallError(
@@ -200,11 +202,18 @@ def _run(cmd: list[str], workspace: Path) -> None:
 
 
 def install_package(workspace: Path) -> None:
+    """The app is a standalone uv project (its own pyproject, uv.lock and .venv), as every
+    user-built package in the workspace is: link its venv and sync it from its own lock."""
     _run(
-        ["uv", "tool", "install", "-e", f"system/apps/{PACKAGE}", "--reinstall"],
+        [
+            "python3",
+            "system/scripts/workspace_bare_scripts/venv_links.py",
+            "ensure-project",
+            f"system/apps/{PACKAGE}",
+        ],
         workspace,
     )
-    _run(["uv", "sync", "--all-packages"], workspace)
+    _run(["uv", "sync", "--locked", "--project", f"system/apps/{PACKAGE}"], workspace)
 
 
 def start(workspace: Path, port: int, timeout: float = 90.0) -> None:

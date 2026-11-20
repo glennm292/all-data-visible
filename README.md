@@ -54,7 +54,7 @@ assets/
 
 ## Requirements
 
-A Minds workspace (supervisord, `forward_port.py`, uv), Python 3.11+, Node.js for query
+A Minds workspace (supervisord, `forward_port.py`, uv), Python 3.12+, Node.js for query
 verification, Playwright + Chromium for screenshots, and internet access to dactal.org for the
 query page itself.
 
