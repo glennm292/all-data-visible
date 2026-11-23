@@ -58,6 +58,25 @@ A Minds workspace (supervisord, `forward_port.py`, uv), Python 3.12+, Node.js fo
 verification, Playwright + Chromium for screenshots, and internet access to dactal.org for the
 query page itself.
 
+## Versions
+
+Tagged from v3.6.0 (2026-11-23) onwards; everything before that is reachable only by commit.
+
+The **major** is the generation of the export format -- the shape a saved query reads, so the
+one thing that can break someone's work. It has turned over twice:
+
+1. the first publish (2026-10-01): each related table a top-level dataset of its own;
+2. `73f5ecf` (2026-10-29): related datasets packaged as one item;
+3. `7d17974` (2026-11-04): each group written as one object rather than a list holding one.
+
+The **minor** counts the feature waves since the format last turned over: logical property
+order, workspace-wide saved views, the rebuild in a short-lived process, skipping an app's
+test material, project renderers, and a page that catches up without being reloaded. Six, so
+the first tag is v3.6.0 rather than v3.0.0 -- pinning it gets you what is here now, not what
+the format looked like when it settled.
+
+A change that alters how an existing query reads is a major; anything additive is a minor.
+
 ## Provenance
 
 DACTAL and the Maker Ecology ethos are Glenn McDonald's (dactal.org, furia.com). The DACTAL
