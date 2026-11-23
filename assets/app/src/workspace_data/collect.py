@@ -68,6 +68,64 @@ BUILD_CONFIG_FILES = frozenset(
 MESSAGE_TEXT_LIMIT = 2000
 TRANSCRIPT_GLOB = "events/*/common_transcript/events.jsonl"
 
+# Everywhere the collectors below read from. Walked (stat only, never read) to answer the one
+# cheap question "has anything changed since the last export?" -- a full rebuild is seconds of
+# work, so it is worth a tenth of a second to find out it is not needed. A collector that reads
+# from somewhere new belongs on this list, or its records go stale between the slow rebuilds.
+WATCHED_ROOTS = (
+    WORKSPACE_DATA,
+    SKILLS_DIR,
+    APPS_DIR,
+    ROUTINE_DEFINITIONS_DIR,
+    MNGR_HOST_DIR,
+    TICKETS_DIR,
+)
+# Not worth walking: build output, virtual environments, and caches hold nothing a collector reads.
+STAMP_DIRS_SKIPPED = frozenset({"__pycache__", "node_modules", ".venv", ".git", "dist", ".cache"})
+# This app's own data directory, left out of the stamp on purpose: writing the export would
+# otherwise move the stamp that triggered it, and the rebuild would go round forever.
+SELF_DATA_DIR = Path(
+    os.environ.get("WORKSPACE_DATA_DATA_DIR", str(WORKSPACE_DATA / ".apps" / SELF_APP))
+)
+
+
+def sources_stamp(roots: tuple[Path, ...] = WATCHED_ROOTS) -> str:
+    """A short string that changes whenever anything the collectors read has been touched.
+
+    Metadata only -- it stats each file and reads none of them -- so it costs a fraction of what
+    building the export costs and can be asked often. It answers "something moved", never what:
+    a file written back with its old contents still moves it, and the export itself then finds
+    the content unchanged and stays as it is.
+    """
+    newest, count, total = 0.0, 0, 0
+    # Compared as absolute paths: the roots are relative to the repo root, but this app's own
+    # data directory can be given as an absolute path (a throwaway instance does exactly that),
+    # and a miss here would have every rebuild trigger the next one.
+    skipped = os.path.abspath(SELF_DATA_DIR)
+    pending = [str(root) for root in roots]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    if (
+                        entry.name not in STAMP_DIRS_SKIPPED
+                        and os.path.abspath(entry.path) != skipped
+                    ):
+                        pending.append(entry.path)
+                    continue
+                stats = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            newest = max(newest, stats.st_mtime)
+            total += stats.st_size
+            count += 1
+    return f"{newest:.3f}-{count}-{total}"
+
 
 def _timezone() -> ZoneInfo | None:
     try:

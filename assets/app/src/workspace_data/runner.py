@@ -14,7 +14,10 @@ workspace's export. What it serves:
   ``dactal_render.js`` (served from ``/app-assets/<app>/``), which offers a display that draws
   that project's rows as the thing they are rather than as a table.
 - ``/data/workspace.json`` is the one export (the single source of truth), rebuilt from the
-  workspace's records by ``export``.
+  workspace's records by ``export``. ``/versions`` says what it holds right now -- a hash of the
+  whole of it and one per dataset -- and ``/datasets?names=a,b`` hands back just those. Together
+  they are how a page someone left open catches up with a change made in another app without
+  being reloaded, pulling only what moved rather than the whole export.
 - ``/open`` asks the workspace to open a window (a chat, a file) and answers 204, so the query
   page never navigates away; ``/raw/<kind>/<id>`` renders a raw record (a skill, a task) as the
   markdown it is.
@@ -56,6 +59,21 @@ EXPORT_PATH = DATA_DIR / "data" / f"{export.DBNAME}.json"
 STALE_AFTER_SECONDS = 10.0
 BACKGROUND_REFRESH_SECONDS = 120.0
 IDLE_AFTER_SECONDS = 900.0
+# How often the loop asks the cheap question -- has anything the collectors read been touched?
+# (``collect.sources_stamp``: a stat walk, a fraction of a second.) A change the person just
+# made in another app is picked up within this, instead of waiting out the long refresh above.
+# Cheap is relative to the machine and how much it holds, so the gap is also kept to a multiple
+# of what the walk itself costs; the page polls on the same beat.
+WATCH_SECONDS = 4.0
+WATCH_GAP_MULTIPLE = 20.0
+# ...but a rebuild costs seconds, and a workspace in use changes constantly (every message of a
+# live conversation is a change). So leave the machine this much quiet between rebuilds: a fixed
+# floor, and a multiple of what the last rebuild actually cost, which fits itself to the machine.
+MIN_REBUILD_GAP_SECONDS = 8.0
+REBUILD_GAP_MULTIPLE = 3.0
+# ...and however short of memory the machine is, keep trying eventually: a rebuild that keeps
+# being killed backs off to here and no further, so the export still catches up once it can.
+MAX_REBUILD_GAP_SECONDS = 600.0
 # A page load uses the machine's folder tree however old its cache is (walking the machine takes
 # seconds); the background loop re-walks it when it is older than the usual ten minutes.
 ANY_AGE = float("inf")
@@ -64,6 +82,11 @@ _refresh_lock = threading.Lock()
 _views_lock = threading.Lock()
 _last_refresh = {"at": 0.0}
 _last_used = {"at": time.monotonic()}
+_last_stamp = {"value": ""}
+_waiting = {"change": False}
+_failures = {"in_a_row": 0}
+_stamp_cost = {"seconds": 0.0}
+_rebuild_cost = {"seconds": 0.0}
 _stop = threading.Event()
 
 
@@ -83,8 +106,15 @@ def refresh_export(
     with _refresh_lock:
         if time.monotonic() - _last_refresh["at"] < max_age and EXPORT_PATH.exists():
             return
-        _rebuild(EXPORT_PATH, machine_max_age)
-        _last_refresh["at"] = time.monotonic()
+        try:
+            _rebuild(EXPORT_PATH, machine_max_age)
+        finally:
+            # The time of the *attempt*, not of the last success. A rebuild that failed --
+            # most often one the out-of-memory killer stopped, which it volunteers for -- must
+            # still start the clock, or the next tick finds it overdue and tries again at
+            # once, and the two of them take turns at the machine for as long as it is short
+            # of memory. The backoff in ``_background_tick`` widens the gap on top of this.
+            _last_refresh["at"] = time.monotonic()
 
 
 def _rebuild(
@@ -111,19 +141,72 @@ def _page_used() -> None:
     _last_used["at"] = time.monotonic()
 
 
+def _rebuild_gap() -> float:
+    """How long to leave the machine alone between rebuilds.
+
+    A multiple of what the last rebuild cost, so a workspace holding more pays more; doubled
+    for each rebuild that failed in a row, because the usual reason a rebuild fails is that
+    the machine is short of memory, and trying again straight away is what makes that worse.
+    """
+    steady = max(MIN_REBUILD_GAP_SECONDS, REBUILD_GAP_MULTIPLE * _rebuild_cost["seconds"])
+    return min(steady * (2 ** _failures["in_a_row"]), MAX_REBUILD_GAP_SECONDS)
+
+
+def _due_for_rebuild(waiting: bool, since: float) -> bool:
+    """A change is waiting and the quiet gap has passed -- or nothing has been rebuilt in a long while.
+
+    The long way round is still there for what a stamp cannot see: the machine's folder tree
+    ages out of its own cache, and a collector may read somewhere nobody listed.
+    """
+    return (waiting and since >= _rebuild_gap()) or since >= BACKGROUND_REFRESH_SECONDS
+
+
+def _watch_gap() -> float:
+    """How long to wait between stamp walks, given what the last walk cost."""
+    return max(WATCH_SECONDS, WATCH_GAP_MULTIPLE * _stamp_cost["seconds"])
+
+
 def _background_tick() -> bool:
-    """One pass of the background loop: rebuild unless the page has gone unused. Returns whether it did."""
+    """One pass of the background loop: rebuild when it is due. Returns whether the page is in use."""
     if time.monotonic() - _last_used["at"] > IDLE_AFTER_SECONDS:
         return False
+    started = time.monotonic()
+    stamp = collect.sources_stamp()
+    _stamp_cost["seconds"] = time.monotonic() - started
+    if stamp != _last_stamp["value"]:
+        _last_stamp["value"] = stamp
+        # Remembered, not acted on: a change seen while the quiet gap still has time to run
+        # would otherwise be forgotten by the next walk, which finds the stamp steady again.
+        _waiting["change"] = True
+    if not _due_for_rebuild(_waiting["change"], time.monotonic() - _last_refresh["at"]):
+        return True
+    _waiting["change"] = False
+    started = time.monotonic()
     try:
-        refresh_export()
+        # The gap as the max age too: a tick and a page's "look now" can arrive together, and
+        # without it the second would rebuild again the moment the first finished.
+        refresh_export(_rebuild_gap(), machine_files.MAX_AGE_SECONDS)
     except OSError as error:
-        app.logger.warning("background refresh failed: %s", error)
+        _failures["in_a_row"] += 1
+        app.logger.warning(
+            "background refresh failed (%d in a row, next in %.0fs): %s",
+            _failures["in_a_row"],
+            _rebuild_gap(),
+            error,
+        )
+    else:
+        _failures["in_a_row"] = 0
+        _rebuild_cost["seconds"] = time.monotonic() - started
     return True
 
 
+def _check_soon() -> None:
+    """Look for a change now rather than on the next beat: the page just came back into view."""
+    threading.Thread(target=_background_tick, name="export-check", daemon=True).start()
+
+
 def _background_refresh() -> None:
-    while not _stop.wait(BACKGROUND_REFRESH_SECONDS):
+    while not _stop.wait(_watch_gap()):
         _background_tick()
 
 
@@ -264,6 +347,60 @@ _SAVED_VIEWS_SCRIPT = """<script>(function(){
 })();</script>"""
 
 
+# Keep an open page's copy current without making the person reload it. The page imports the
+# whole export when it loads and then never looks again, so a change made in another app -- a
+# notebook cleared, a note written -- used to be invisible here until the window was refreshed.
+# This polls the export's per-dataset hashes and pulls back only the datasets that moved, which
+# is why it can run every few seconds: the whole export is tens of megabytes, one dataset is
+# usually a few hundred kilobytes. It touches the data, never the person's saved views (those
+# are _SAVED_VIEWS_SCRIPT's) and never the query box they may be typing in.
+_LIVE_DATA_SCRIPT = """<script>(function(){
+  var POLL_MS = %(poll_ms)d;
+  var known = null;
+  function currentQuery(){ var box = document.getElementById('dactal'); return box ? box.value : ''; }
+  function editing(){ return document.activeElement && document.activeElement.id === 'dactal'; }
+  async function tick(lookNow){
+    if (document.hidden || typeof dactal === 'undefined' || !dactal.data) return;
+    try {
+      var response = await fetch('versions' + (lookNow ? '?check=1' : ''), {cache: 'no-store'});
+      if (!response.ok) return;
+      var now = (await response.json()).datasets || {};
+      if (known === null) { known = now; return; }
+      var changed = Object.keys(now).filter(function(name){ return known[name] !== now[name]; });
+      var gone = Object.keys(known).filter(function(name){ return !(name in now); });
+      if (!changed.length && !gone.length) return;
+      if (changed.length) {
+        var pulled = await fetch('datasets?names=' + encodeURIComponent(changed.join(',')),
+                                 {cache: 'no-store'});
+        if (!pulled.ok) return;
+        var fragment = await pulled.json();
+        if (window.linkFilesExport) fragment = window.linkFilesExport(fragment);
+        Object.keys(fragment.data).forEach(function(name){
+          dactal.load(fragment.data[name], name);
+          dsave(name);
+        });
+        if (window.relinkFilesData) window.relinkFilesData(dactal.data);
+      }
+      // A dataset the export no longer has (an app's records deleted) goes from the copy too --
+      // the same pruning _RETIRE_SCRIPT does when a whole export is re-imported.
+      gone.forEach(function(name){ delete dactal.data[name]; dactaldb.remove(name); });
+      known = now;
+      // Show it, when what is on screen is built from something that just moved and the person
+      // is not mid-edit. runQuery() with no argument re-runs whatever the query box holds.
+      var query = currentQuery();
+      if (!editing() && query && changed.concat(gone).some(function(name){ return query.indexOf(name) !== -1; })) {
+        runQuery();
+      }
+    } catch (error) { /* a poll that fails is a poll skipped; the next one catches up */ }
+  }
+  // Coming back to this window is the moment it most matters: the change was very likely made
+  // in whatever window was in front of it, so ask the server to look straight away.
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) tick(true); });
+  window.setInterval(function(){ tick(false); }, POLL_MS);
+  window.addEventListener('load', function(){ tick(true); });
+})();</script>"""
+
+
 def served_dactal_html() -> str:
     page = (ASSETS / "dactal.html").read_text(encoding="utf-8")
     version = export.content_version(EXPORT_PATH)
@@ -280,6 +417,7 @@ def served_dactal_html() -> str:
         _files_tree_script()
         + _RETIRE_SCRIPT
         + _SAVED_VIEWS_SCRIPT
+        + _LIVE_DATA_SCRIPT % {"poll_ms": int(WATCH_SECONDS * 1000)}
         + _WORKSPACE_GLUE
         + _project_renderer_scripts()
         + "</body>",
@@ -436,6 +574,54 @@ def project_asset(app_name: str, filename: str) -> WerkzeugResponse:
     return response
 
 
+@app.route("/versions")
+def versions() -> Response:
+    """What the export holds right now: a hash of the whole of it, and one per dataset.
+
+    A page that is already open reads this every few seconds to tell what has moved since it
+    loaded, so it can fetch back only that and leave everything else alone.
+    """
+    _page_used()
+    path = EXPORT_PATH.with_name(export.VERSIONS_NAME)
+    if not path.is_file():
+        refresh_export(STALE_AFTER_SECONDS, ANY_AGE)
+    elif request.args.get("check"):
+        _check_soon()
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        body = '{"version": "none", "datasets": {}}'
+    response = Response(body, mimetype="application/json")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/datasets")
+def datasets() -> Response:
+    """The named datasets as the export now has them, shaped as an export the page can import.
+
+    Takes ``?names=a,b`` -- what the page found changed in ``versions``. A name the export does
+    not have is left out rather than refused, so a dataset that vanished between the two calls
+    does not cost the page its whole catch-up.
+    """
+    _page_used()
+    wanted = [name for name in request.args.get("names", "").split(",") if name]
+    if not wanted:
+        abort(400)
+    try:
+        whole = json.loads(EXPORT_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        abort(503)
+    held = whole.get("data", {})
+    picked = {name: held[name] for name in wanted if name in held}
+    response = Response(
+        json.dumps({"export": export.DBNAME, "data": picked}, ensure_ascii=False),
+        mimetype="application/json",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/catalog.json")
 def catalog() -> Response:
     return send_from_directory(ASSETS, "catalog.json", mimetype="application/json")
@@ -508,7 +694,13 @@ def health() -> Response:
 
 
 def main() -> None:
-    refresh_export(machine_max_age=ANY_AGE)
+    try:
+        refresh_export(machine_max_age=ANY_AGE)
+    except OSError as error:
+        # Most often the out-of-memory killer, which a rebuild deliberately volunteers for.
+        # Refusing to start over it would leave the person with no Data app at all; the loop
+        # below and the first page load both try again, and what is already on disk still serves.
+        app.logger.warning("the refresh at startup failed, carrying on: %s", error)
     threading.Thread(
         target=_background_refresh, name="export-refresh", daemon=True
     ).start()

@@ -110,3 +110,181 @@ def test_a_projects_assets_are_served_but_nothing_outside_them(
     assert client.get("/app-assets/demo-app/draw.js").get_data(as_text=True) == "// drawing"
     assert client.get("/app-assets/demo-app/../secret.py").status_code == 404
     assert client.get("/app-assets/not-an-app/draw.js").status_code == 404
+
+
+class _NoThread:
+    def start(self) -> None:
+        pass
+
+
+class _StillStamp:
+    """A collector whose stamp never moves after the first walk, as a quiet workspace's does not."""
+
+    def __init__(self) -> None:
+        self.walks = 0
+
+    def sources_stamp(self) -> str:
+        self.walks += 1
+        return "one-change-then-quiet"
+
+
+# ---- keeping a page that is already open current -----------------------------------------
+
+
+def test_a_change_is_rebuilt_sooner_than_the_long_way_round() -> None:
+    """The whole point: a change made a moment ago does not wait out the slow refresh."""
+    assert runner._due_for_rebuild(waiting=True, since=runner._rebuild_gap() + 1) is True
+    assert runner._due_for_rebuild(waiting=False, since=runner._rebuild_gap() + 1) is False
+
+
+def test_a_busy_workspace_is_not_rebuilt_over_and_over(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every message of a live conversation is a change; rebuilding on each would eat the machine."""
+    monkeypatch.setattr(runner, "_rebuild_cost", {"seconds": 8.0})
+
+    assert runner._rebuild_gap() == runner.REBUILD_GAP_MULTIPLE * 8.0
+    assert runner._due_for_rebuild(waiting=True, since=1.0) is False
+    # What a stamp cannot see still gets picked up the long way round.
+    assert runner._due_for_rebuild(waiting=False, since=runner.BACKGROUND_REFRESH_SECONDS) is True
+
+
+def test_the_watch_gap_grows_with_what_the_walk_costs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "_stamp_cost", {"seconds": 0.0})
+    assert runner._watch_gap() == runner.WATCH_SECONDS
+
+    monkeypatch.setattr(runner, "_stamp_cost", {"seconds": 2.0})
+    assert runner._watch_gap() == runner.WATCH_GAP_MULTIPLE * 2.0
+
+
+def test_the_page_is_told_what_each_dataset_holds_now(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "EXPORT_PATH", tmp_path / "workspace.json")
+    (tmp_path / export.VERSIONS_NAME).write_text('{"version": "abc", "datasets": {"rosette": "d1"}}')
+
+    body = runner.app.test_client().get("/versions").get_json()
+
+    assert body == {"version": "abc", "datasets": {"rosette": "d1"}}
+
+
+def test_only_the_datasets_that_moved_are_sent_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sending the whole export back for one changed record is tens of megabytes of waste."""
+    monkeypatch.setattr(runner, "EXPORT_PATH", tmp_path / "workspace.json")
+    (tmp_path / "workspace.json").write_text(
+        '{"export": "workspace", "data": {"rosette": [{"id": "r1"}], "messages": [{"id": "m1"}]}}'
+    )
+    client = runner.app.test_client()
+
+    body = client.get("/datasets?names=rosette,nothing_here").get_json()
+
+    assert body == {"export": "workspace", "data": {"rosette": [{"id": "r1"}]}}
+    assert client.get("/datasets").status_code == 400
+
+
+def test_the_served_page_keeps_itself_current(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without this the page shows what the workspace held when it was opened, until reloaded."""
+    monkeypatch.setattr(runner.collect, "collect_project_renderers", list)
+
+    page = runner.served_dactal_html()
+
+    assert "fetch('versions'" in page
+    assert "datasets?names=" in page
+    assert f"var POLL_MS = {int(runner.WATCH_SECONDS * 1000)};" in page
+    # Coming back to the window asks the server to look straight away.
+    assert "tick(true)" in page
+
+
+def test_a_change_seen_during_the_quiet_gap_is_not_forgotten(
+    rebuilds: list[tuple[Path, float]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The walk that follows finds the stamp steady again, so the change has to be remembered."""
+    monkeypatch.setattr(runner, "_last_stamp", {"value": ""})
+    monkeypatch.setattr(runner, "_waiting", {"change": False})
+    monkeypatch.setattr(runner, "_rebuild_cost", {"seconds": 0.0})
+    monkeypatch.setattr(runner, "collect", _StillStamp())
+    # A rebuild just happened, so the quiet gap has not run out yet.
+    monkeypatch.setattr(runner, "_last_refresh", {"at": time.monotonic()})
+    runner._page_used()
+
+    runner._background_tick()
+    assert rebuilds == []
+    assert runner._waiting["change"] is True
+
+    monkeypatch.setattr(
+        runner, "_last_refresh", {"at": time.monotonic() - runner._rebuild_gap() - 1}
+    )
+    runner._background_tick()
+
+    assert len(rebuilds) == 1
+    assert runner._waiting["change"] is False
+
+
+def test_the_app_still_starts_when_the_first_rebuild_is_killed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rebuild volunteers to be killed when memory runs short; that must not cost the app."""
+    served: list[bool] = []
+
+    def blown(max_age: float = 0.0, machine_max_age: float = 0.0) -> None:
+        raise runner.ExportRebuildError("export rebuild failed: its process was killed")
+
+    monkeypatch.setattr(runner, "refresh_export", blown)
+    monkeypatch.setattr(runner.threading, "Thread", lambda **kwargs: _NoThread())
+    monkeypatch.setattr(runner, "run_simple", lambda *a, **k: served.append(True))
+
+    runner.main()
+
+    assert served == [True]
+
+
+def test_a_rebuild_that_was_killed_does_not_start_another_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retrying straight away is what turns one shortage of memory into a loop of them."""
+    monkeypatch.setattr(runner, "EXPORT_PATH", tmp_path / "workspace.json")
+    monkeypatch.setattr(runner, "_last_refresh", {"at": 0.0})
+    monkeypatch.setattr(runner, "_rebuild", lambda path, max_age: (_ for _ in ()).throw(
+        runner.ExportRebuildError("its process was killed")
+    ))
+
+    with pytest.raises(runner.ExportRebuildError):
+        runner.refresh_export()
+
+    assert runner._last_refresh["at"] > 0.0
+
+
+def test_the_gap_widens_while_rebuilds_keep_being_killed(
+    rebuilds: list[tuple[Path, float]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "_failures", {"in_a_row": 0})
+    monkeypatch.setattr(runner, "_rebuild_cost", {"seconds": 0.0})
+    steady = runner._rebuild_gap()
+
+    monkeypatch.setattr(runner, "_failures", {"in_a_row": 3})
+    assert runner._rebuild_gap() == steady * 8
+
+    monkeypatch.setattr(runner, "_failures", {"in_a_row": 50})
+    assert runner._rebuild_gap() == runner.MAX_REBUILD_GAP_SECONDS
+
+
+def test_a_failed_rebuild_is_counted_and_a_good_one_clears_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "_failures", {"in_a_row": 0})
+    monkeypatch.setattr(runner, "_waiting", {"change": True})
+    monkeypatch.setattr(runner, "_last_refresh", {"at": 0.0})
+    monkeypatch.setattr(runner, "collect", _StillStamp())
+    runner._page_used()
+
+    monkeypatch.setattr(runner, "refresh_export", lambda *a, **k: (_ for _ in ()).throw(
+        runner.ExportRebuildError("its process was killed")
+    ))
+    runner._background_tick()
+    assert runner._failures["in_a_row"] == 1
+
+    monkeypatch.setattr(runner, "_waiting", {"change": True})
+    monkeypatch.setattr(runner, "_last_refresh", {"at": 0.0})
+    monkeypatch.setattr(runner, "refresh_export", lambda *a, **k: None)
+    runner._background_tick()
+    assert runner._failures["in_a_row"] == 0

@@ -15,7 +15,10 @@ the catalog gains connectors over time.
   `window.DACTAL`). This is what runs queries, in the browser and -- with a
   `global.window = global` shim -- in Node (for the query harness in
   `scripts/verify_queries.js` and for server-side execution in
-  `assets/run_query.js` in the dactal-based skill, for apps with custom surfaces).
+  `assets/run_query.cjs` in the dactal-based skill, for apps with custom surfaces).
+  The `.cjs` is load-bearing wherever you copy that file: a `.js` under a
+  `package.json` declaring `"type": "module"` -- which `system/package.json` does --
+  is read as an ES module, and the executor is CommonJS.
 - `https://dactal.org/dactal_utils.js` -- the front-end UI layer: `render()`, the
   renderer registry (`add_renderer`), `import_data`, the data-file init, the reset
   semantics, cell-link rendering. Read this when you need to know *how the
@@ -48,7 +51,7 @@ hand-written-code lint/ratchet scope).
 
 `run.py` needs only the Python standard library for `fetch-frontend` and
 `verify-queries`; `verify-visual` additionally needs Playwright + Chromium. The
-query harness (`verify-queries`) and `run_query.js` need Node.js.
+query harness (`verify-queries`) and `run_query.cjs` need Node.js.
 
 ### Cache-bust the live front-end scripts, or updates run stale
 

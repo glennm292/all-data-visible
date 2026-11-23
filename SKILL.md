@@ -75,6 +75,21 @@ or whose owner would rather not, is finished at `datasets.py`. What makes it che
 drawing is written once and serves both -- the app's own views and the query page -- so say that,
 and say it is a change to the app's code, before the user decides.
 
+Notice the other thing too, which is the one this skill's own ethos asks for and the one most
+often missed. Once an app hands its records over, look at what the app itself *does* with them:
+a page that groups, counts, ranks, filters or scores its own records in code is doing arithmetic
+the user cannot see, beside an export where the same thing could be a query they can read. Where
+you find that, **offer** to turn it round -- the app publishes the query, and its own page renders
+the result of running it, so what the page shows and what "see the query" opens cannot drift apart.
+That is the `dactal-based` skill's territory, not this one's: load it
+(`references/use-what-you-expose.md` in particular) rather than improvising, and expect the move
+to need three things -- the derived values a query cannot compute become fields in the shaped data,
+with a `???note` saying how; the app runs the published query through the real engine rather than
+reimplementing it; and every view it backs carries a link into the query page. Encouraged, never
+required, and a real change to the app's code -- so say so, and say what it buys, before the user
+decides. The gain is not tidiness: it is that the arithmetic stops being yours and starts being
+theirs.
+
 ### 3. Verify `[script]`
 
 ```
@@ -114,6 +129,17 @@ of built-in shortcuts; never move the user's own icons.
 - **One export, read by everything.** `data/.apps/workspace-data/data/workspace.json`,
   rewritten only when its content changes. The page re-imports its private browser copy only
   when that content hash moves, so the user's own saved queries and explorations survive.
+- **A page already open catches up on its own.** Data a person changes in another app -- a
+  notebook cleared, a note written -- has to reach a query page they left open, or they have to
+  know to reload it, which is exactly the kind of thing nobody should have to know. Two halves,
+  and both are needed: the server asks a cheap question between rebuilds (`collect.sources_stamp`,
+  a stat walk of the places collectors read) and rebuilds when the answer moves rather than only
+  on a timer; the page polls `versions` and pulls back through `datasets?names=` only the
+  datasets whose hash moved (`_LIVE_DATA_SCRIPT`). Keep both cheap and keep them apart: a
+  rebuild is seconds of work, so it is rate-limited to a multiple of what the last one cost and
+  runs at a low priority, and the walk never reads a file. A new collector reading somewhere new
+  belongs in `collect.WATCHED_ROOTS`, and this app's own output must stay out of it -- counting
+  what a rebuild writes makes every rebuild trigger the next one.
 - **Read in place, never copy-and-discard.** The workspace's own files are the raw source;
   every row carries `source` and/or an `open` link back to it.
 - **Package related datasets as one object.** Datasets that belong together -- one project's

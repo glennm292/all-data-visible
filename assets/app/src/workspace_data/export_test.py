@@ -504,3 +504,71 @@ def test_the_rebuild_program_writes_the_export(
     monkeypatch.setattr("sys.argv", ["export", str(target), "inf"])
     export.main()
     assert "file system" in json.loads(target.read_text(encoding="utf-8"))["data"]
+
+
+# ---- telling a page that is already open what moved ---------------------------------------
+
+
+def test_each_dataset_carries_its_own_version(workspace: Path, tmp_path: Path) -> None:
+    """One hash for the whole export means one changed record costs a full re-import."""
+    target = tmp_path / "out" / "workspace.json"
+    export.write_export(target, machine_max_age=float("inf"))
+    sidecar = json.loads((target.parent / export.VERSIONS_NAME).read_text(encoding="utf-8"))
+
+    assert sidecar["version"] == export.content_version(target)
+    built = json.loads(target.read_text(encoding="utf-8"))["data"]
+    assert set(sidecar["datasets"]) == set(built)
+
+
+def test_only_the_dataset_that_changed_gets_a_new_version() -> None:
+    before = export.dataset_versions({"rosette": [{"id": "r1"}], "memories": [{"id": "m1"}]})
+    after = export.dataset_versions({"rosette": [{"id": "r1"}, {"id": "r2"}], "memories": [{"id": "m1"}]})
+
+    assert after["rosette"] != before["rosette"]
+    assert after["memories"] == before["memories"]
+
+
+def test_the_versions_are_written_even_when_the_export_itself_did_not_change(
+    workspace: Path, tmp_path: Path
+) -> None:
+    """A workspace installed before this had an export but no sidecar; the page needs one."""
+    target = tmp_path / "out" / "workspace.json"
+    export.write_export(target, machine_max_age=float("inf"))
+    sidecar = target.parent / export.VERSIONS_NAME
+    sidecar.unlink()
+
+    assert export.write_export(target, machine_max_age=float("inf")) is False
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["datasets"]
+
+
+# ---- the cheap question asked between rebuilds --------------------------------------------
+
+
+def test_the_stamp_moves_when_a_record_is_written(tmp_path: Path) -> None:
+    watched = tmp_path / "data"
+    (watched / ".apps" / "rosette").mkdir(parents=True)
+    note = watched / ".apps" / "rosette" / "cleared.json"
+    note.write_text("[]")
+    roots = (watched,)
+
+    before = collect.sources_stamp(roots)
+    note.write_text('[{"id": "r1"}]')
+    os.utime(note, (1, 1_700_000_000))
+
+    assert collect.sources_stamp(roots) != before
+
+
+def test_the_stamp_ignores_what_the_export_itself_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counting its own output would make every rebuild trigger the next one, forever."""
+    watched = tmp_path / "data"
+    own = watched / ".apps" / "workspace-data"
+    own.mkdir(parents=True)
+    monkeypatch.setattr(collect, "SELF_DATA_DIR", own)
+    roots = (watched,)
+
+    before = collect.sources_stamp(roots)
+    (own / "workspace.json").write_text("{}")
+
+    assert collect.sources_stamp(roots) == before

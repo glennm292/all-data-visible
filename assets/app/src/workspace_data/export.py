@@ -19,6 +19,9 @@ from workspace_data import collect, machine_files
 
 DBNAME = "workspace"
 FIRST_TOUR_QUERY = "everything in this workspace"
+# Written beside the export: the hash of the whole export and one per dataset. A page that is
+# already open reads this to tell what moved without pulling the export itself down again.
+VERSIONS_NAME = f"{DBNAME}.versions.json"
 
 CONNECTORS = [
     {
@@ -404,24 +407,53 @@ def build_export(machine_max_age: float = machine_files.MAX_AGE_SECONDS) -> dict
     }
 
 
+def _hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def dataset_versions(data: dict) -> dict[str, str]:
+    """A content hash per dataset, so a page already open can fetch back only what moved.
+
+    Without it the only version there is covers the whole export, and one changed record means
+    re-importing every dataset -- tens of megabytes, while the person is reading a result.
+    """
+    return {
+        name: _hash(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+        for name, value in data.items()
+    }
+
+
+def write_versions(path: Path, body: str, data: dict) -> None:
+    """Write the export's version sidecar: the whole export's hash, and one per dataset."""
+    payload = {"version": _hash(body), "datasets": dataset_versions(data)}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
 def write_export(path: Path, machine_max_age: float = machine_files.MAX_AGE_SECONDS) -> bool:
     """Rebuild the export and write it to ``path`` only when its content changed. Returns whether it did.
 
     The machine's folder tree is re-walked when its cache is older than ``machine_max_age``.
     """
+    built = build_export(machine_max_age)
     # Not sort_keys: ``build_export`` already puts every object's properties in their logical order
     # (``logical``), and sorting here would alphabetize them.
-    body = json.dumps(build_export(machine_max_age), ensure_ascii=False, separators=(",", ":"))
+    body = json.dumps(built, ensure_ascii=False, separators=(",", ":"))
+    versions_path = path.with_name(VERSIONS_NAME)
     try:
-        if path.read_text(encoding="utf-8") == body:
-            return False
+        unchanged = path.read_text(encoding="utf-8") == body
     except OSError:
-        pass
+        unchanged = False
+    if unchanged and versions_path.is_file():
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(body, encoding="utf-8")
-    tmp.replace(path)
-    return True
+    if not unchanged:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(body, encoding="utf-8")
+        tmp.replace(path)
+    write_versions(versions_path, body, built["data"])
+    return not unchanged
 
 
 def content_version(path: Path) -> str:
@@ -441,6 +473,12 @@ def rebuild_in_own_process(path: Path, machine_max_age: float) -> None:
     """
     try:
         Path("/proc/self/oom_score_adj").write_text("1000")
+    except OSError:
+        pass
+    # Nobody is waiting on this: it runs so an open page can catch up with a change that has
+    # already happened. Whatever the person is actually doing goes first.
+    try:
+        os.nice(10)
     except OSError:
         pass
     write_export(path, machine_max_age)
